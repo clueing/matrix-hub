@@ -173,17 +173,30 @@ class XiaohongshuAdapter(BasePublisherAdapter):
 
         try:
             log("正在进入小红书创作者中心发布页...")
-            await page.goto(self.publish_url, timeout=45000, wait_until="networkidle")
+            await page.goto(self.publish_url, timeout=30000, wait_until="domcontentloaded")
             await asyncio.sleep(2)
 
-            # 切换到“上传视频”标签
-            video_tab = await page.query_selector("div:has-text('上传视频'), span:has-text('上传视频')")
-            if video_tab:
-                await video_tab.click()
-                await asyncio.sleep(1)
+            # 检查是否由于未授权或凭证失效被拦截跳转至登录页
+            if "login" in page.url or "401" in page.url:
+                raise Exception("账号登录凭证已失效或未授权，请在账号管理中重新扫码或呼出窗口登录")
+
+            # 切换到“上传视频”标签（若存在图文/视频切换标签）
+            try:
+                video_tab = await page.wait_for_selector(
+                    "div:has-text('上传视频'), span:has-text('上传视频'), .tab:has-text('视频')",
+                    timeout=5000
+                )
+                if video_tab and await video_tab.is_visible():
+                    await video_tab.click()
+                    await asyncio.sleep(1)
+            except Exception:
+                pass
 
             # 定位文件上传 input 控件
-            file_input = await page.query_selector("input[type='file'][accept*='video'], input[type='file']")
+            file_input = await page.wait_for_selector(
+                "input[type='file'][accept*='video'], input[type='file']",
+                timeout=15000
+            )
             if not file_input:
                 raise Exception("未找到小红书视频上传控件")
 

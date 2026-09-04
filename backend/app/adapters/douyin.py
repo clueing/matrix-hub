@@ -162,11 +162,18 @@ class DouyinAdapter(BasePublisherAdapter):
 
         try:
             log("正在导航至抖音创作者服务平台上传页面...")
-            await page.goto(self.publish_url, timeout=45000, wait_until="networkidle")
+            await page.goto(self.publish_url, timeout=30000, wait_until="domcontentloaded")
             await asyncio.sleep(2)
 
+            # 检查是否由于未授权或凭证失效被拦截跳转至登录页
+            if "passport" in page.url or "login" in page.url:
+                raise Exception("账号登录凭证已失效或未授权，请在账号管理中重新扫码或呼出窗口登录")
+
             # 寻找并注入视频文件
-            file_input = await page.query_selector("input[type='file'][accept*='video'], input[type='file']")
+            file_input = await page.wait_for_selector(
+                "input[type='file'][accept*='video'], input[type='file']",
+                timeout=15000
+            )
             if not file_input:
                 raise Exception("未定位到抖音视频上传控件")
 
