@@ -61,6 +61,17 @@ export const scanFolder = (folderPath: string) =>
 export const verifyVideo = (videoPath: string) =>
   apiClient.post("/videos/verify", { video_path: videoPath })
 
+export const pickLocalFile = () =>
+  apiClient.post("/videos/pick-file")
+
+export const pickLocalFolder = () =>
+  apiClient.post("/videos/pick-folder")
+
+export const uploadVideoFile = (formData: FormData) =>
+  apiClient.post("/videos/upload", formData, {
+    headers: { "Content-Type": "multipart/form-data" }
+  })
+
 // ==================== 系统设置接口 ====================
 export const getSettings = () =>
   apiClient.get("/settings")

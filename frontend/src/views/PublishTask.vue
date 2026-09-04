@@ -24,15 +24,65 @@
       <!-- 1对多模式下的视频选择 -->
       <div v-if="taskType === 'one_to_many'">
         <el-form label-width="120px">
-          <el-form-item label="原始视频路径" required>
-            <el-input v-model="singleVideoPath" placeholder="例如: D:\videos\my_vlog.mp4" style="max-width: 600px;">
+          <el-form-item label="选择视频素材" required>
+            <div class="flex flex-col gap-3 w-full" style="max-width: 700px;">
+              <div class="flex items-center gap-3">
+                <el-button type="primary" size="large" @click="handlePickFile" :loading="pickingFile">
+                  <el-icon class="mr-1"><FolderOpened /></el-icon> 调起系统窗口选择视频
+                </el-button>
+                <el-upload
+                  action=""
+                  :auto-upload="false"
+                  :show-file-list="false"
+                  :on-change="handleBrowserFileSelect"
+                  accept="video/*,.mp4,.mov,.flv,.mkv,.webm"
+                >
+                  <el-button type="success" size="large">
+                    <el-icon class="mr-1"><Upload /></el-icon> 浏览器选择/上传视频
+                  </el-button>
+                </el-upload>
+              </div>
+
+              <!-- 拖拽上传区域 -->
+              <el-upload
+                class="video-uploader"
+                drag
+                action=""
+                :auto-upload="false"
+                :show-file-list="false"
+                :on-change="handleBrowserFileSelect"
+                accept="video/*,.mp4,.mov,.flv,.mkv,.webm"
+              >
+                <el-icon class="el-icon--upload"><UploadFilled /></el-icon>
+                <div class="el-upload__text">
+                  将本地视频文件拖拽到此处，或 <em>点击上传</em>
+                </div>
+                <template #tip>
+                  <div class="el-upload__tip text-xs text-gray-400">
+                    支持 MP4, MOV, FLV, MKV 等格式原始视频
+                  </div>
+                </template>
+              </el-upload>
+            </div>
+          </el-form-item>
+
+          <el-form-item label="已选视频路径">
+            <el-input 
+              v-model="singleVideoPath" 
+              placeholder="通过上方按钮选择，或手动粘贴路径（如: D:\videos\my_vlog.mp4）" 
+              style="max-width: 700px;"
+              clearable
+              @change="handleVerifySingleVideo"
+            >
               <template #append>
                 <el-button @click="handleVerifySingleVideo">校验文件</el-button>
               </template>
             </el-input>
           </el-form-item>
+
           <el-form-item v-if="singleVideoInfo" label="视频信息">
-            <el-tag type="success">
+            <el-tag type="success" size="large">
+              <el-icon class="mr-1"><VideoPlay /></el-icon>
               {{ singleVideoInfo.name }} ({{ singleVideoInfo.size_mb }} MB) - 文件可读正常
             </el-tag>
           </el-form-item>
@@ -42,10 +92,23 @@
       <!-- 多对多模式下的文件夹扫描批量导入 -->
       <div v-else>
         <el-form label-width="120px">
-          <el-form-item label="本地素材文件夹" required>
-            <el-input v-model="folderPath" placeholder="例如: D:\my_channel_videos" style="max-width: 600px;">
+          <el-form-item label="选择素材文件夹" required>
+            <div class="flex items-center gap-3 w-full" style="max-width: 700px;">
+              <el-button type="primary" size="large" @click="handlePickFolder" :loading="pickingFolder">
+                <el-icon class="mr-1"><FolderOpened /></el-icon> 调起系统窗口选择文件夹
+              </el-button>
+            </div>
+          </el-form-item>
+
+          <el-form-item label="文件夹绝对路径">
+            <el-input 
+              v-model="folderPath" 
+              placeholder="通过上方按钮选择，或手动粘贴路径（如: D:\my_channel_videos）" 
+              style="max-width: 700px;"
+              clearable
+            >
               <template #append>
-                <el-button type="primary" :loading="scanning" @click="handleScanFolder">扫描文件夹</el-button>
+                <el-button type="primary" :loading="scanning" @click="handleScanFolder">重新扫描</el-button>
               </template>
             </el-input>
           </el-form-item>
@@ -217,17 +280,22 @@
 import { ref, onMounted } from "vue"
 import { useRouter } from "vue-router"
 import { ElMessage } from "element-plus"
-import { Check } from "@element-plus/icons-vue"
-import { getAccounts, scanFolder, verifyVideo, createTask } from "../api"
+import { Check, FolderOpened, Upload, VideoPlay, UploadFilled } from "@element-plus/icons-vue"
+import { 
+  getAccounts, scanFolder, verifyVideo, createTask, 
+  pickLocalFile, pickLocalFolder, uploadVideoFile 
+} from "../api"
 
 const router = useRouter()
 
 const taskType = ref("one_to_many")
 const singleVideoPath = ref("")
 const singleVideoInfo = ref<any>(null)
+const pickingFile = ref(false)
 
 const folderPath = ref("")
 const scanning = ref(false)
+const pickingFolder = ref(false)
 const scannedVideos = ref<any[]>([])
 
 const availableAccounts = ref<any[]>([])
@@ -258,6 +326,74 @@ const loadAccounts = async () => {
 
 const handleTypeChange = () => {
   buildSubtaskItems()
+}
+
+const handlePickFile = async () => {
+  pickingFile.value = true
+  try {
+    const res: any = await pickLocalFile()
+    if (res && res.data && res.data.file_path) {
+      singleVideoPath.value = res.data.file_path
+      singleVideoInfo.value = {
+        name: res.data.file_name,
+        size_mb: res.data.size_mb,
+        path: res.data.file_path
+      }
+      if (!form.value.master_title) {
+        form.value.master_title = res.data.file_name.replace(/\.[^/.]+$/, "")
+      }
+      ElMessage.success(`已选择视频文件: ${res.data.file_name}`)
+      buildSubtaskItems()
+    }
+  } catch (e: any) {
+    ElMessage.error(e.message)
+  } finally {
+    pickingFile.value = false
+  }
+}
+
+const handleBrowserFileSelect = async (uploadFile: any) => {
+  if (!uploadFile || !uploadFile.raw) return
+  const formData = new FormData()
+  formData.append("file", uploadFile.raw)
+  const loadingMsg = ElMessage.info({ message: "正在上传并载入视频素材...", duration: 0 })
+  try {
+    const res: any = await uploadVideoFile(formData)
+    loadingMsg.close()
+    if (res && res.data && res.data.file_path) {
+      singleVideoPath.value = res.data.file_path
+      singleVideoInfo.value = {
+        name: res.data.file_name,
+        size_mb: res.data.size_mb,
+        path: res.data.file_path
+      }
+      if (!form.value.master_title) {
+        form.value.master_title = res.data.file_name.replace(/\.[^/.]+$/, "")
+      }
+      ElMessage.success(`视频上传并校验成功: ${res.data.file_name}`)
+      buildSubtaskItems()
+    }
+  } catch (e: any) {
+    loadingMsg.close()
+    ElMessage.error(e.message)
+  }
+}
+
+const handlePickFolder = async () => {
+  pickingFolder.value = true
+  try {
+    const res: any = await pickLocalFolder()
+    if (res && res.data && res.data.folder_path) {
+      folderPath.value = res.data.folder_path
+      scannedVideos.value = res.data.videos || []
+      ElMessage.success(`已选择文件夹并扫描到 ${scannedVideos.value.length} 个视频素材`)
+      buildSubtaskItems()
+    }
+  } catch (e: any) {
+    ElMessage.error(e.message)
+  } finally {
+    pickingFolder.value = false
+  }
 }
 
 const handleVerifySingleVideo = async () => {
