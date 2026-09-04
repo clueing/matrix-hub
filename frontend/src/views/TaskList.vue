@@ -59,13 +59,49 @@
                     <el-tag v-if="sub.status === 'published'" type="success" size="small">已发布</el-tag>
                     <el-tag v-else-if="sub.status === 'uploading'" type="primary" size="small">上传中</el-tag>
                     <el-tag v-else-if="sub.status === 'failed'" type="danger" size="small">发布失败</el-tag>
+                    <el-tag v-else-if="sub.status === 'cancelled'" type="info" size="small">已取消</el-tag>
                     <el-tag v-else type="info" size="small">排队中</el-tag>
                   </template>
                 </el-table-column>
-                <el-table-column prop="error_message" label="错误提示" min-width="180">
+                <el-table-column prop="error_message" label="执行提示" min-width="180">
                   <template #default="{ row: sub }">
                     <span v-if="sub.error_message" class="text-xs text-red-500">{{ sub.error_message }}</span>
                     <span v-else class="text-gray-400">-</span>
+                  </template>
+                </el-table-column>
+                <!-- 子任务操作栏：发布成功前允许取消与编辑 -->
+                <el-table-column label="操作" width="160" align="center">
+                  <template #default="{ row: sub }">
+                    <div class="flex items-center justify-center gap-1">
+                      <el-button 
+                        v-if="sub.status !== 'published'" 
+                        size="small" 
+                        type="primary" 
+                        link 
+                        @click="openEditSubtaskDialog(sub)"
+                      >
+                        编辑
+                      </el-button>
+                      <el-popconfirm 
+                        v-if="sub.status !== 'published' && sub.status !== 'cancelled'" 
+                        title="确定要取消该子任务吗？" 
+                        @confirm="handleCancelSubtask(sub.id)"
+                      >
+                        <template #reference>
+                          <el-button size="small" type="danger" link>取消</el-button>
+                        </template>
+                      </el-popconfirm>
+                      <el-button 
+                        v-if="sub.status === 'failed'" 
+                        size="small" 
+                        type="warning" 
+                        link 
+                        @click="handleRetrySubtask(sub.id)"
+                      >
+                        重试
+                      </el-button>
+                      <span v-if="sub.status === 'published'" class="text-xs text-green-600 font-medium">已完成</span>
+                    </div>
                   </template>
                 </el-table-column>
               </el-table>
@@ -106,6 +142,7 @@
             <el-tag v-else-if="row.status === 'processing'" type="primary">执行中</el-tag>
             <el-tag v-else-if="row.status === 'partial_failed'" type="warning">部分失败</el-tag>
             <el-tag v-else-if="row.status === 'failed'" type="danger">失败</el-tag>
+            <el-tag v-else-if="row.status === 'cancelled'" type="info">已取消</el-tag>
             <el-tag v-else type="info">待排期</el-tag>
           </template>
         </el-table-column>
@@ -114,15 +151,75 @@
             {{ row.created_at ? row.created_at.slice(0, 19).replace('T', ' ') : '-' }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="120" align="center">
+        <el-table-column label="操作" width="180" align="center">
           <template #default="{ row }">
-            <el-button v-if="row.fail_count > 0" size="small" type="warning" link @click="handleRetry(row.id)">
-              重试失败
-            </el-button>
+            <div class="flex items-center justify-center gap-1">
+              <el-button v-if="row.fail_count > 0" size="small" type="warning" link @click="handleRetry(row.id)">
+                重试失败
+              </el-button>
+              <el-popconfirm 
+                v-if="row.status === 'processing' || row.status === 'pending' || row.status === 'partial_failed'" 
+                title="确定要取消该任务所有未发布的子任务吗？" 
+                @confirm="handleCancelTask(row.id)"
+              >
+                <template #reference>
+                  <el-button size="small" type="danger" link>取消任务</el-button>
+                </template>
+              </el-popconfirm>
+              <el-popconfirm title="确定要删除此任务记录吗？" @confirm="handleDeleteTask(row.id)">
+                <template #reference>
+                  <el-button size="small" type="info" link>删除</el-button>
+                </template>
+              </el-popconfirm>
+            </div>
           </template>
         </el-table-column>
       </el-table>
     </el-card>
+
+    <!-- 编辑子任务模态框 -->
+    <el-dialog v-model="editDialogVisible" title="编辑子作品发布配置" width="560px">
+      <el-form :model="editForm" label-width="110px">
+        <el-form-item label="目标账号">
+          <el-tag :type="editingSubtask?.platform === 'xiaohongshu' ? 'danger' : 'primary'">
+            {{ editingSubtask?.platform === 'xiaohongshu' ? '小红书' : '抖音' }} ({{ editingSubtask?.account_name }})
+          </el-tag>
+        </el-form-item>
+        <el-form-item label="作品标题" required>
+          <el-input v-model="editForm.title" placeholder="作品标题 (小红书限20字以内)" />
+        </el-form-item>
+        <el-form-item label="正文描述">
+          <el-input v-model="editForm.description" type="textarea" :rows="3" placeholder="作品正文描述..." />
+        </el-form-item>
+        <el-form-item label="话题标签">
+          <el-select 
+            v-model="editForm.tags" 
+            multiple 
+            filterable 
+            allow-create 
+            default-first-option 
+            placeholder="输入标签后回车" 
+            style="width: 100%"
+          />
+        </el-form-item>
+        <el-form-item v-if="editingSubtask?.schedule_mode !== 'immediate'" label="预约发布时间">
+          <el-date-picker
+            v-model="editForm.scheduled_at"
+            type="datetime"
+            placeholder="选择预约公开时间"
+            format="YYYY-MM-DD HH:mm"
+            value-format="YYYY-MM-DDTHH:mm:ss"
+          />
+        </el-form-item>
+        <el-form-item label="独立封面图">
+          <el-input v-model="editForm.cover_path" placeholder="可选图片绝对路径" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="editDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="savingEdit" @click="submitEditSubtask">保存修改</el-button>
+      </template>
+    </el-dialog>
 
     <!-- 实时运行日志抽屉 -->
     <el-drawer v-model="showLogDrawer" title="实时执行日志" size="45%">
@@ -142,13 +239,28 @@
 import { ref, onMounted, onUnmounted } from "vue"
 import { ElMessage } from "element-plus"
 import { Refresh, Document } from "@element-plus/icons-vue"
-import { getTasks, getTaskDetails, retryTask } from "../api"
+import { 
+  getTasks, getTaskDetails, retryTask, cancelTask, 
+  deleteTask, cancelSubtask, updateSubtask, retrySubtask 
+} from "../api"
 
 const loading = ref(false)
 const tasks = ref<any[]>([])
 const statusFilter = ref("")
 const showLogDrawer = ref(false)
 const logs = ref<any[]>([])
+
+// 编辑子任务模态框状态
+const editDialogVisible = ref(false)
+const editingSubtask = ref<any>(null)
+const savingEdit = ref(false)
+const editForm = ref({
+  title: "",
+  description: "",
+  tags: [] as string[],
+  scheduled_at: null as string | null,
+  cover_path: ""
+})
 
 let ws: WebSocket | null = null
 
@@ -198,6 +310,77 @@ const handleRetry = async (taskId: string) => {
     loadTasks()
   } catch (e: any) {
     ElMessage.error(e.message)
+  }
+}
+
+const handleCancelTask = async (taskId: string) => {
+  try {
+    const res: any = await cancelTask(taskId)
+    ElMessage.success(res.message)
+    loadTasks()
+  } catch (e: any) {
+    ElMessage.error(e.message)
+  }
+}
+
+const handleDeleteTask = async (taskId: string) => {
+  try {
+    const res: any = await deleteTask(taskId)
+    ElMessage.success(res.message)
+    loadTasks()
+  } catch (e: any) {
+    ElMessage.error(e.message)
+  }
+}
+
+const handleCancelSubtask = async (subtaskId: string) => {
+  try {
+    const res: any = await cancelSubtask(subtaskId)
+    ElMessage.success(res.message)
+    loadTasks()
+  } catch (e: any) {
+    ElMessage.error(e.message)
+  }
+}
+
+const handleRetrySubtask = async (subtaskId: string) => {
+  try {
+    const res: any = await retrySubtask(subtaskId)
+    ElMessage.success(res.message)
+    loadTasks()
+  } catch (e: any) {
+    ElMessage.error(e.message)
+  }
+}
+
+const openEditSubtaskDialog = (sub: any) => {
+  editingSubtask.value = sub
+  editForm.value = {
+    title: sub.title,
+    description: sub.description || "",
+    tags: [...(sub.tags || [])],
+    scheduled_at: sub.scheduled_at || null,
+    cover_path: sub.cover_path || ""
+  }
+  editDialogVisible.value = true
+}
+
+const submitEditSubtask = async () => {
+  if (!editingSubtask.value) return
+  if (!editForm.value.title.trim()) {
+    ElMessage.warning("作品标题不能为空")
+    return
+  }
+  savingEdit.value = true
+  try {
+    await updateSubtask(editingSubtask.value.id, editForm.value)
+    ElMessage.success("子作品配置修改成功！")
+    editDialogVisible.value = false
+    loadTasks()
+  } catch (e: any) {
+    ElMessage.error(e.message)
+  } finally {
+    savingEdit.value = false
   }
 }
 

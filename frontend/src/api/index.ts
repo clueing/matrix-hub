@@ -54,6 +54,21 @@ export const createTask = (data: any) =>
 export const retryTask = (taskId: string) =>
   apiClient.post(`/tasks/${taskId}/retry`)
 
+export const cancelTask = (taskId: string) =>
+  apiClient.post(`/tasks/${taskId}/cancel`)
+
+export const deleteTask = (taskId: string) =>
+  apiClient.delete(`/tasks/${taskId}`)
+
+export const cancelSubtask = (subtaskId: string) =>
+  apiClient.post(`/tasks/subtasks/${subtaskId}/cancel`)
+
+export const updateSubtask = (subtaskId: string, data: any) =>
+  apiClient.patch(`/tasks/subtasks/${subtaskId}`, data)
+
+export const retrySubtask = (subtaskId: string) =>
+  apiClient.post(`/tasks/subtasks/${subtaskId}/retry`)
+
 // ==================== 视频文件接口 ====================
 export const scanFolder = (folderPath: string) =>
   apiClient.post("/videos/scan-folder", { folder_path: folderPath })
