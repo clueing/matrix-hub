@@ -55,39 +55,59 @@ class XiaohongshuAdapter(BasePublisherAdapter):
             return False, None
 
     async def get_login_qrcode(self, page: Page) -> Optional[str]:
-        """打开小红书登录页，自动定位二维码并提取 Base64 供前端扫码 (耗时仅需1~2秒)"""
+        """打开小红书登录页，自动切换至扫码模式并精准提取真实 160x160 登录二维码"""
         try:
             await page.goto(self.login_url, timeout=20000, wait_until="domcontentloaded")
-            
-            # 优先等待包含 data:image 的二维码图片节点
-            try:
-                qr_img = await page.wait_for_selector("img[src*='data:image']", timeout=8000)
-                if qr_img:
-                    src = await qr_img.get_attribute("src")
-                    if src and src.startswith("data:image"):
-                        return src
-            except Exception:
-                pass
+            await asyncio.sleep(1.5)
 
-            # 备用：遍历查找二维码候选图片或 canvas
-            qr_selectors = [
-                "img[class*='qrcode']", ".qrcode-img", "div[class*='qrcode'] img",
-                "canvas", ".login-box img", "img"
+            # 1. 优先检查当前是否已经展示真实二维码 (尺寸需 >= 100x100，排除 64x64 的右上角角标图标)
+            imgs = await page.query_selector_all("img")
+            for img in imgs:
+                try:
+                    box = await img.bounding_box()
+                    src = await img.get_attribute("src")
+                    if box and box["width"] >= 100 and box["height"] >= 100 and src and src.startswith("data:image"):
+                        return src
+                except Exception:
+                    continue
+
+            # 2. 若未展示真实二维码，说明默认停留在手机号/验证码登录态，需点击右上角角标切换为扫码登录
+            toggle_selectors = [
+                "img.css-wemwzq", 
+                ".css-jjnw1w", 
+                "div[class*='login-box'] img",
+                ".login-box-container img",
+                "img[class*='wemwzq']"
             ]
-            for sel in qr_selectors:
-                el = await page.query_selector(sel)
-                if el and await el.is_visible():
-                    src = await el.get_attribute("src")
-                    if src and src.startswith("data:image"):
-                        return src
-                    img_bytes = await el.screenshot()
-                    b64 = base64.b64encode(img_bytes).decode("utf-8")
-                    return f"data:image/png;base64,{b64}"
+            for sel in toggle_selectors:
+                toggle = await page.query_selector(sel)
+                if toggle:
+                    try:
+                        await toggle.click()
+                        break
+                    except Exception:
+                        continue
 
-            # 兜底截取登录卡片区域
-            login_box = await page.query_selector(".login-box, div[class*='login'], div[class*='panel']")
-            if login_box:
-                img_bytes = await login_box.screenshot()
+            # 3. 点击切换后，轮询等待真实二维码生成 (寻找 width >= 100 的 data:image 图片)
+            for _ in range(12):  # 最多等待 6 秒
+                await asyncio.sleep(0.5)
+                imgs = await page.query_selector_all("img")
+                for img in imgs:
+                    try:
+                        box = await img.bounding_box()
+                        src = await img.get_attribute("src")
+                        if box and box["width"] >= 100 and box["height"] >= 100 and src and src.startswith("data:image"):
+                            return src
+                    except Exception:
+                        continue
+
+            # 4. 备用：按专有类名精准查找或截图
+            qr_el = await page.query_selector("img.css-1lhmg90, div.css-1d81qt0 img, .qrcode-img")
+            if qr_el:
+                src = await qr_el.get_attribute("src")
+                if src and src.startswith("data:image"):
+                    return src
+                img_bytes = await qr_el.screenshot()
                 b64 = base64.b64encode(img_bytes).decode("utf-8")
                 return f"data:image/png;base64,{b64}"
 
