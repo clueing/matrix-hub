@@ -169,10 +169,11 @@ class DouyinAdapter(BasePublisherAdapter):
             if "passport" in page.url or "login" in page.url:
                 raise Exception("账号登录凭证已失效或未授权，请在账号管理中重新扫码或呼出窗口登录")
 
-            # 寻找并注入视频文件
+            # 寻找并注入视频文件 (使用 state="attached" 允许捕获可能被 CSS 隐藏的底层 file 控件)
             file_input = await page.wait_for_selector(
                 "input[type='file'][accept*='video'], input[type='file']",
-                timeout=15000
+                state="attached",
+                timeout=20000
             )
             if not file_input:
                 raise Exception("未定位到抖音视频上传控件")

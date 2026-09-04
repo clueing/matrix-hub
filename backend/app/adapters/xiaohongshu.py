@@ -192,10 +192,11 @@ class XiaohongshuAdapter(BasePublisherAdapter):
             except Exception:
                 pass
 
-            # 定位文件上传 input 控件
+            # 定位文件上传 input 控件 (小红书前端 input.upload-input 设置了隐藏样式，必须使用 state='attached' 捕获)
             file_input = await page.wait_for_selector(
-                "input[type='file'][accept*='video'], input[type='file']",
-                timeout=15000
+                "input.upload-input, input[type='file'][accept*='video'], input[type='file']",
+                state="attached",
+                timeout=20000
             )
             if not file_input:
                 raise Exception("未找到小红书视频上传控件")
