@@ -108,12 +108,24 @@
           <img :src="qrcodeBase64" alt="登录二维码" style="width: 220px; height: 220px; object-fit: contain;" />
           <div class="text-sm text-gray-600 mt-2 font-medium">请打开对应手机 App 扫码登录</div>
         </div>
-        <div v-else class="py-12 flex flex-col items-center justify-center">
+        <div v-else class="py-10 flex flex-col items-center justify-center">
           <el-icon class="is-loading text-3xl text-primary mb-2"><Loading /></el-icon>
           <span class="text-sm text-gray-500">正在拉起隔离浏览器并提取二维码...</span>
         </div>
-        <div class="mt-3 text-xs text-gray-400">
-          如遇拼图滑块，系统将提示呼出本地窗口手动辅助完成
+        <div class="mt-4 pt-3 border-t flex flex-col items-center gap-2">
+          <span class="text-xs text-gray-400">
+            若遇到拼图滑块验证或二维码提取缓慢，可一键呼出桌面窗口直接操作
+          </span>
+          <el-button 
+            type="warning" 
+            plain 
+            size="small" 
+            :disabled="!currentLoginAccountId" 
+            @click="handleAssistFromDialog"
+          >
+            <el-icon class="mr-1"><Monitor /></el-icon>
+            呼出桌面 Chrome 辅助窗口 (过滑块/扫码)
+          </el-button>
         </div>
       </div>
 
@@ -189,6 +201,37 @@ const importing = ref(false)
 const selectedFile = ref<File | null>(null)
 const overwriteOnImport = ref(true)
 
+// 辅助登录与状态自动同步轮询器
+let assistPollTimer: any = null
+
+const startAssistPolling = (accountId: string) => {
+  if (assistPollTimer) clearInterval(assistPollTimer)
+  let attempts = 0
+  assistPollTimer = setInterval(async () => {
+    attempts++
+    if (attempts > 90) { // 最多持续轮询 3 分钟
+      clearInterval(assistPollTimer)
+      assistPollTimer = null
+      return
+    }
+    try {
+      const res: any = await getAccounts({ platform: platformFilter.value || undefined })
+      if (res && res.data) {
+        accounts.value = res.data
+        const target = res.data.find((a: any) => a.id === accountId)
+        if (target && target.status === "active") {
+          ElMessage.success(`【${target.account_name}】授权状态已自动同步为有效！`)
+          clearInterval(assistPollTimer)
+          assistPollTimer = null
+          if (loginDialogVisible.value) {
+            closeLoginDialog()
+          }
+        }
+      }
+    } catch (e) {}
+  }, 2000)
+}
+
 // WebSocket 连接
 let ws: WebSocket | null = null
 
@@ -206,9 +249,11 @@ const initWebSocket = () => {
         }
       } else if (msg.event === "account_status_changed") {
         loadAccounts()
-        if (isLoggingIn.value && msg.data.id === currentLoginAccountId.value && msg.data.status === "active") {
-          ElMessage.success("账号扫码登录成功！")
-          closeLoginDialog()
+        if (msg.data.status === "active") {
+          if (loginDialogVisible.value && msg.data.id === currentLoginAccountId.value) {
+            ElMessage.success(`【${msg.data.account_name}】扫码授权成功！`)
+            closeLoginDialog()
+          }
         }
       }
     } catch (e) {}
@@ -231,6 +276,7 @@ const openLoginDialog = () => {
   loginDialogVisible.value = true
   isLoggingIn.value = false
   qrcodeBase64.value = ""
+  currentLoginAccountId.value = ""
 }
 
 const closeLoginDialog = () => {
@@ -238,6 +284,7 @@ const closeLoginDialog = () => {
   isLoggingIn.value = false
   qrcodeBase64.value = ""
   currentLoginAccountId.value = ""
+  loadAccounts()
 }
 
 const handleStartLogin = async () => {
@@ -246,8 +293,23 @@ const handleStartLogin = async () => {
   try {
     const res: any = await startLogin(loginForm.value)
     currentLoginAccountId.value = res.data.account_id
+    // 立即刷新列表保证新增的待授权账号即时可见
+    loadAccounts()
+    // 启动状态同步轮询
+    startAssistPolling(res.data.account_id)
   } catch (e: any) {
     isLoggingIn.value = false
+    ElMessage.error(e.message)
+  }
+}
+
+const handleAssistFromDialog = async () => {
+  if (!currentLoginAccountId.value) return
+  try {
+    await launchAssist(currentLoginAccountId.value)
+    ElMessage.success("已在桌面呼出 Chrome 窗口，请在弹出的窗口中操作，完成后将自动同步！")
+    startAssistPolling(currentLoginAccountId.value)
+  } catch (e: any) {
     ElMessage.error(e.message)
   }
 }
@@ -273,6 +335,7 @@ const handleLaunchAssist = async (acc: any) => {
   try {
     await launchAssist(acc.id)
     ElMessage.success("已在桌面弹出受控 Chrome 窗口，请在弹窗中滑动滑块或输入验证码！")
+    startAssistPolling(acc.id)
   } catch (e: any) {
     ElMessage.error(e.message)
   }
@@ -348,6 +411,10 @@ onMounted(() => {
 
 onUnmounted(() => {
   if (ws) ws.close()
+  if (assistPollTimer) {
+    clearInterval(assistPollTimer)
+    assistPollTimer = null
+  }
 })
 </script>
 
