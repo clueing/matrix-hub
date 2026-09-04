@@ -1,4 +1,5 @@
 import os
+import json
 import asyncio
 from pathlib import Path
 from typing import Tuple, Optional
@@ -76,6 +77,17 @@ class PlaywrightDriver(BaseDriver):
             accept_downloads=True
         )
 
+        # 若存在持久化凭证文件，确保其中的 Cookies 被加载还原
+        storage_file = account_dir / "storage_state.json"
+        if storage_file.exists():
+            try:
+                with open(storage_file, "r", encoding="utf-8") as sf:
+                    state_data = json.load(sf)
+                    if "cookies" in state_data and state_data["cookies"]:
+                        await context.add_cookies(state_data["cookies"])
+            except Exception:
+                pass
+
         # 获取或创建初始页面
         if len(context.pages) > 0:
             page = context.pages[0]
@@ -93,9 +105,21 @@ class PlaywrightDriver(BaseDriver):
         self._active_contexts[account_id] = context
         return context, page
 
+    async def close_account_context(self, account_id: str):
+        """按账号ID关闭已打开的上下文并释放文件锁"""
+        ctx = self._active_contexts.pop(account_id, None)
+        if ctx:
+            try:
+                await ctx.close()
+            except Exception:
+                pass
+
     async def close_context(self, context: BrowserContext, page: Optional[Page] = None):
         """关闭上下文并释放资源"""
         try:
+            for acc_id, c in list(self._active_contexts.items()):
+                if c == context:
+                    self._active_contexts.pop(acc_id, None)
             if page and not page.is_closed():
                 await page.close()
             await context.close()

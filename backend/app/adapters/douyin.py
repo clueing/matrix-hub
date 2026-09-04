@@ -67,18 +67,24 @@ class DouyinAdapter(BasePublisherAdapter):
             return False, None
 
     async def get_login_qrcode(self, page: Page) -> Optional[str]:
-        """进入抖音登录页面，定位并截取扫码二维码数据流"""
+        """进入抖音登录页面，快速定位并截取扫码二维码"""
         try:
-            await page.goto(self.login_url, timeout=30000, wait_until="networkidle")
-            await asyncio.sleep(2)
+            await page.goto(self.login_url, timeout=20000, wait_until="domcontentloaded")
+            
+            # 优先等待带 data:image 或 qrcode 的图片
+            try:
+                qr_img = await page.wait_for_selector("img[src*='data:image'], .qrcode-image, img[class*='qrcode']", timeout=8000)
+                if qr_img:
+                    src = await qr_img.get_attribute("src")
+                    if src and src.startswith("data:image"):
+                        return src
+                    img_bytes = await qr_img.screenshot()
+                    b64 = base64.b64encode(img_bytes).decode("utf-8")
+                    return f"data:image/png;base64,{b64}"
+            except Exception:
+                pass
 
-            # 尝试切换扫码登录 Tab
-            qr_tab = await page.query_selector("span:has-text('扫码登录'), div:has-text('扫码登录')")
-            if qr_tab:
-                await qr_tab.click()
-                await asyncio.sleep(1)
-
-            # 定位二维码图片或包含二维码的容器
+            # 备用选择器
             qr_selectors = [
                 "img[class*='qrcode']", ".qrcode-image", "canvas",
                 "div[class*='qrcode-box']", "div[class*='qrcode-wrapper']",
@@ -103,19 +109,43 @@ class DouyinAdapter(BasePublisherAdapter):
             return None
 
     async def wait_for_login(self, page: Page, timeout: int = 120) -> Tuple[bool, Optional[Dict[str, Any]]]:
-        """等待用户使用抖音 App 扫码登录"""
+        """等待用户使用抖音 App 扫码登录 (不打断当前页面)"""
         start_time = asyncio.get_event_loop().time()
         while asyncio.get_event_loop().time() - start_time < timeout:
+            if page.is_closed():
+                return False, None
+
             if "creator-micro" in page.url or "home" in page.url:
                 await asyncio.sleep(2)
-                return await self.check_login_status(page)
+                return True, await self._extract_user_info_from_page(page)
 
             logged_indicator = await page.query_selector(".semi-avatar, .header-user-info")
-            if logged_indicator:
-                return await self.check_login_status(page)
+            if logged_indicator and await logged_indicator.is_visible():
+                await asyncio.sleep(1)
+                return True, await self._extract_user_info_from_page(page)
 
-            await asyncio.sleep(2)
+            await asyncio.sleep(1.5)
         return False, None
+
+    async def _extract_user_info_from_page(self, page: Page) -> Dict[str, Any]:
+        """提取抖音昵称信息"""
+        name_selectors = [
+            ".semi-navigation-header-title", ".user-name", 
+            "span[class*='name']", "div[class*='account-name']",
+            ".header-user-info span"
+        ]
+        account_name = "抖音创作者"
+        for sel in name_selectors:
+            try:
+                el = await page.query_selector(sel)
+                if el:
+                    text = (await el.inner_text()).strip()
+                    if text and len(text) < 30:
+                        account_name = text
+                        break
+            except Exception:
+                pass
+        return {"name": account_name, "uid": None, "avatar": None}
 
     async def publish_video(
         self, 

@@ -32,94 +32,111 @@ class XiaohongshuAdapter(BasePublisherAdapter):
         return "https://creator.xiaohongshu.com/publish/publish?source=official"
 
     async def check_login_status(self, page: Page) -> Tuple[bool, Optional[Dict[str, Any]]]:
-        """访问创作者后台主页，通过 URL 和界面用户信息元素判断登录态有效性"""
+        """访问创作者后台主页，通过 Cookie 与页面重定向判断登录态有效性"""
         try:
-            await page.goto(self.creator_url, timeout=30000, wait_until="domcontentloaded")
-            await asyncio.sleep(2)
-            
-            # 若重定向回登录页，则说明未登录或已过期
-            if "login" in page.url:
+            # 1. 先探测 context 中是否存在小红书核心鉴权 Cookie
+            cookies = await page.context.cookies()
+            cookie_names = [c["name"].lower() for c in cookies]
+            if not any(k in cookie_names for k in ["web_session", "a1", "webid"]):
                 return False, None
 
-            # 探测创作者昵称元素
-            name_selectors = [
-                ".name-box", ".user-name", ".con-name", 
-                "div[class*='userName']", "div[class*='name']"
-            ]
-            account_name = "小红书创作者"
-            for sel in name_selectors:
-                el = await page.query_selector(sel)
-                if el:
-                    text = (await el.inner_text()).strip()
-                    if text:
-                        account_name = text
-                        break
+            # 2. 访问创作者主页
+            await page.goto(self.creator_url, timeout=25000, wait_until="domcontentloaded")
+            await asyncio.sleep(3)
+            
+            # 若重定向回登录页或携带 401 提示，则说明未登录或已过期
+            curr_url = page.url
+            if "login" in curr_url or "401" in curr_url:
+                return False, None
 
-            return True, {
-                "name": account_name,
-                "uid": None,
-                "avatar": None
-            }
-        except Exception as e:
+            info = await self._extract_user_info_from_page(page)
+            return True, info
+        except Exception:
             return False, None
 
     async def get_login_qrcode(self, page: Page) -> Optional[str]:
-        """打开小红书登录页，自动定位二维码并截取为 Base64 供前端扫码"""
+        """打开小红书登录页，自动定位二维码并提取 Base64 供前端扫码 (耗时仅需1~2秒)"""
         try:
-            await page.goto(self.login_url, timeout=30000, wait_until="networkidle")
-            await asyncio.sleep(2)
+            await page.goto(self.login_url, timeout=20000, wait_until="domcontentloaded")
+            
+            # 优先等待包含 data:image 的二维码图片节点
+            try:
+                qr_img = await page.wait_for_selector("img[src*='data:image']", timeout=8000)
+                if qr_img:
+                    src = await qr_img.get_attribute("src")
+                    if src and src.startswith("data:image"):
+                        return src
+            except Exception:
+                pass
 
-            # 尝试切换到二维码扫码 Tab（部分页面默认是验证码登录）
-            qr_tab = await page.query_selector("div:has-text('扫码登录'), span:has-text('二维码登录')")
-            if qr_tab:
-                await qr_tab.click()
-                await asyncio.sleep(1)
-
-            # 寻找二维码图片元素或 canvas
+            # 备用：遍历查找二维码候选图片或 canvas
             qr_selectors = [
-                ".qrcode-img", "img[class*='qrcode']", ".qrcode-box img",
-                "div[class*='qrcode'] img", ".login-box img", "canvas[class*='qrcode']"
+                "img[class*='qrcode']", ".qrcode-img", "div[class*='qrcode'] img",
+                "canvas", ".login-box img", "img"
             ]
-            qr_el = None
             for sel in qr_selectors:
                 el = await page.query_selector(sel)
                 if el and await el.is_visible():
-                    qr_el = el
-                    break
+                    src = await el.get_attribute("src")
+                    if src and src.startswith("data:image"):
+                        return src
+                    img_bytes = await el.screenshot()
+                    b64 = base64.b64encode(img_bytes).decode("utf-8")
+                    return f"data:image/png;base64,{b64}"
 
-            if qr_el:
-                # 截取二维码元素
-                img_bytes = await qr_el.screenshot()
-                b64 = base64.b64encode(img_bytes).decode("utf-8")
-                return f"data:image/png;base64,{b64}"
-            
-            # 若无法精确定位二维码节点，则截取右侧登录卡片区域
-            login_box = await page.query_selector(".login-box, div[class*='login']")
+            # 兜底截取登录卡片区域
+            login_box = await page.query_selector(".login-box, div[class*='login'], div[class*='panel']")
             if login_box:
                 img_bytes = await login_box.screenshot()
                 b64 = base64.b64encode(img_bytes).decode("utf-8")
                 return f"data:image/png;base64,{b64}"
 
             return None
-        except Exception as e:
+        except Exception:
             return None
 
     async def wait_for_login(self, page: Page, timeout: int = 120) -> Tuple[bool, Optional[Dict[str, Any]]]:
-        """轮询等待用户在手机 App 上确认扫码授权"""
+        """轮询等待用户在手机 App 上确认扫码授权 (不主动调用 page.goto，绝不打断用户操作)"""
         start_time = asyncio.get_event_loop().time()
         while asyncio.get_event_loop().time() - start_time < timeout:
-            if "login" not in page.url:
-                # 已经完成跳转进入后台
-                await asyncio.sleep(2)
-                return await self.check_login_status(page)
-            
-            # 检测是否已经出现登录后的用户控件
-            success_indicator = await page.query_selector(".user-info, .header-avatar, .con-name")
-            if success_indicator:
-                return await self.check_login_status(page)
+            if page.is_closed():
+                return False, None
 
-            await asyncio.sleep(2)
+            # 1. 检查页面 URL 是否已跳转离开登录页
+            if "login" not in page.url:
+                await asyncio.sleep(2)
+                info = await self._extract_user_info_from_page(page)
+                return True, info
+
+            # 2. 检查是否出现已登录用户标识元素
+            success_indicator = await page.query_selector(".user-info, .header-avatar, .con-name, .name-box")
+            if success_indicator and await success_indicator.is_visible():
+                await asyncio.sleep(1)
+                info = await self._extract_user_info_from_page(page)
+                return True, info
+
+            await asyncio.sleep(1.5)
         return False, None
+
+    async def _extract_user_info_from_page(self, page: Page) -> Dict[str, Any]:
+        """从当前已登录页面中提取创作者昵称等基本信息"""
+        account_name = "小红书创作者"
+        name_selectors = [
+            ".name-box", ".user-name", ".con-name", 
+            "div[class*='userName']", "div[class*='name']",
+            ".author-name", ".user-info span"
+        ]
+        for sel in name_selectors:
+            try:
+                el = await page.query_selector(sel)
+                if el:
+                    text = (await el.inner_text()).strip()
+                    if text and len(text) < 40:
+                        account_name = text
+                        break
+            except Exception:
+                pass
+        return {"name": account_name, "uid": None, "avatar": None}
 
     async def publish_video(
         self, 
