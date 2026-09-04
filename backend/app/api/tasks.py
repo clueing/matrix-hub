@@ -146,3 +146,131 @@ async def retry_failed_subtasks(task_id: str, db: AsyncSession = Depends(get_db)
     await db.commit()
     await scheduler_service.schedule_batch_subtasks(retry_list, base_interval_seconds=60)
     return {"code": 0, "message": f"已将 {len(retry_list)} 个失败子任务重新加入重试队列"}
+
+@router.post("/{task_id}/cancel", summary="取消主任务及其所有未发布的子任务")
+async def cancel_task(task_id: str, db: AsyncSession = Depends(get_db)):
+    """取消该任务下所有处于排队、待定或失败状态的子任务"""
+    task_res = await db.execute(select(PublishTask).where(PublishTask.id == task_id))
+    task = task_res.scalar_one_or_none()
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    subs_res = await db.execute(select(PublishSubtask).where(PublishSubtask.task_id == task_id))
+    subtasks = subs_res.scalars().all()
+
+    cancelled_count = 0
+    for s in subtasks:
+        if s.status not in ["published", "cancelled"]:
+            scheduler_service.cancel_subtask_job(s.id)
+            s.status = "cancelled"
+            s.error_message = "用户手动取消发布"
+            cancelled_count += 1
+
+    task.status = "cancelled"
+    await db.commit()
+    return {"code": 0, "message": f"已成功取消 {cancelled_count} 个未发布的子任务"}
+
+@router.delete("/{task_id}", summary="删除发布任务记录")
+async def delete_task(task_id: str, db: AsyncSession = Depends(get_db)):
+    """从数据库彻底删除该任务及其子任务"""
+    task_res = await db.execute(select(PublishTask).where(PublishTask.id == task_id))
+    task = task_res.scalar_one_or_none()
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    subs_res = await db.execute(select(PublishSubtask).where(PublishSubtask.task_id == task_id))
+    subtasks = subs_res.scalars().all()
+    for s in subtasks:
+        scheduler_service.cancel_subtask_job(s.id)
+
+    await db.delete(task)
+    await db.commit()
+    return {"code": 0, "message": "任务记录已彻底删除"}
+
+class UpdateSubtaskRequest(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    tags: Optional[List[str]] = None
+    scheduled_at: Optional[datetime] = None
+    cover_path: Optional[str] = None
+
+@router.patch("/subtasks/{subtask_id}", summary="编辑未发布的子任务内容与时间")
+async def update_subtask(
+    subtask_id: str, 
+    payload: UpdateSubtaskRequest, 
+    db: AsyncSession = Depends(get_db)
+):
+    """在发布成功前支持随时修改标题、正文、标签及预约发布时间"""
+    res = await db.execute(select(PublishSubtask).where(PublishSubtask.id == subtask_id))
+    subtask = res.scalar_one_or_none()
+    if not subtask:
+        raise HTTPException(status_code=404, detail="子任务不存在")
+    if subtask.status == "published":
+        raise HTTPException(status_code=400, detail="该子作品已发布成功，无法再修改")
+
+    if payload.title is not None:
+        subtask.title = payload.title
+    if payload.description is not None:
+        subtask.description = payload.description
+    if payload.tags is not None:
+        subtask.tags = payload.tags
+    if payload.cover_path is not None:
+        subtask.cover_path = payload.cover_path
+    if payload.scheduled_at is not None:
+        subtask.scheduled_at = payload.scheduled_at
+        if subtask.status in ["scheduled", "pending"]:
+            await scheduler_service.schedule_single_subtask(
+                subtask_id=subtask.id,
+                schedule_mode=subtask.schedule_mode,
+                scheduled_at=payload.scheduled_at
+            )
+
+    await db.commit()
+    await db.refresh(subtask)
+    return {"code": 0, "message": "子任务配置已成功更新", "data": subtask.to_dict()}
+
+@router.post("/subtasks/{subtask_id}/cancel", summary="单独取消指定的未发布子任务")
+async def cancel_single_subtask(subtask_id: str, db: AsyncSession = Depends(get_db)):
+    """取消单个尚未发布的子任务"""
+    res = await db.execute(select(PublishSubtask).where(PublishSubtask.id == subtask_id))
+    subtask = res.scalar_one_or_none()
+    if not subtask:
+        raise HTTPException(status_code=404, detail="子任务不存在")
+    if subtask.status == "published":
+        raise HTTPException(status_code=400, detail="该作品已成功发布，无法取消")
+
+    scheduler_service.cancel_subtask_job(subtask.id)
+    subtask.status = "cancelled"
+    subtask.error_message = "用户已手动取消该子任务"
+
+    task_res = await db.execute(select(PublishTask).where(PublishTask.id == subtask.task_id))
+    task = task_res.scalar_one_or_none()
+    if task:
+        subs_res = await db.execute(select(PublishSubtask).where(PublishSubtask.task_id == task.id))
+        all_subs = subs_res.scalars().all()
+        if all(s.status in ["published", "cancelled", "failed"] for s in all_subs):
+            if all(s.status == "cancelled" for s in all_subs):
+                task.status = "cancelled"
+            elif any(s.status == "published" for s in all_subs):
+                task.status = "completed" if all(s.status in ["published", "cancelled"] for s in all_subs) else "partial_failed"
+            else:
+                task.status = "failed"
+
+    await db.commit()
+    return {"code": 0, "message": "子任务已成功取消"}
+
+@router.post("/subtasks/{subtask_id}/retry", summary="单独重试指定的子任务")
+async def retry_single_subtask(subtask_id: str, db: AsyncSession = Depends(get_db)):
+    """对单个失败的子任务进行立即重试"""
+    res = await db.execute(select(PublishSubtask).where(PublishSubtask.id == subtask_id))
+    subtask = res.scalar_one_or_none()
+    if not subtask:
+        raise HTTPException(status_code=404, detail="子任务不存在")
+
+    subtask.status = "pending"
+    subtask.retry_count += 1
+    subtask.error_message = None
+    await db.commit()
+
+    await scheduler_service.schedule_single_subtask(subtask.id, schedule_mode="immediate")
+    return {"code": 0, "message": "子任务已重新加入执行队列"}

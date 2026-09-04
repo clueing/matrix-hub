@@ -98,4 +98,43 @@ class SchedulerService:
                     f"子任务已预约在指定时间错峰触发: {run_time.strftime('%Y-%m-%d %H:%M:%S')}"
                 )
 
+    def cancel_subtask_job(self, subtask_id: str) -> bool:
+        """从 APScheduler 队列中安全移除指定子任务的作业"""
+        job_id = f"subtask_{subtask_id}"
+        if self.scheduler.get_job(job_id):
+            try:
+                self.scheduler.remove_job(job_id)
+                return True
+            except Exception:
+                pass
+        return False
+
+    async def schedule_single_subtask(
+        self, 
+        subtask_id: str, 
+        schedule_mode: str = "immediate", 
+        scheduled_at=None, 
+        delay_seconds: int = 0
+    ):
+        """重新编排/调度单个子任务"""
+        self.cancel_subtask_job(subtask_id)
+        now = datetime.now()
+        if schedule_mode in ["immediate", "platform_native"]:
+            run_time = now + timedelta(seconds=delay_seconds)
+        else:
+            if isinstance(scheduled_at, str):
+                target_dt = datetime.fromisoformat(scheduled_at.replace("Z", ""))
+            else:
+                target_dt = scheduled_at or now
+            run_time = target_dt + timedelta(seconds=delay_seconds)
+
+        self.scheduler.add_job(
+            publisher_service.execute_subtask,
+            "date",
+            run_date=run_time,
+            args=[subtask_id],
+            id=f"subtask_{subtask_id}",
+            replace_existing=True
+        )
+
 scheduler_service = SchedulerService()
