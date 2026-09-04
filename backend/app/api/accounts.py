@@ -67,10 +67,10 @@ async def check_account(account_id: str, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=400, detail=str(e))
 
 @router.post("/{account_id}/assist", summary="唤起本地窗口人工辅助 (过滑块/短信)")
-async def launch_assist(account_id: str, db: AsyncSession = Depends(get_db)):
+async def launch_assist(account_id: str):
     """在宿主机桌面弹出可见的 Chrome 窗口供人工滑动验证码"""
     import asyncio
-    asyncio.create_task(account_service.launch_visible_assist(db, account_id))
+    asyncio.create_task(account_service.launch_visible_assist(account_id))
     return {"code": 0, "message": "桌面辅助窗口已成功拉起，请在弹窗中操作"}
 
 @router.patch("/{account_id}", summary="修改账号信息 (分组/代理/备注名)")

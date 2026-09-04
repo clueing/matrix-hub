@@ -20,6 +20,9 @@ class AccountService:
     负责账号授权流程（扫码推流、会话保存）、健康监测、人工辅助弹窗以及账号凭证的导出与导入
     """
 
+    def __init__(self):
+        self._active_tasks: Dict[str, asyncio.Task] = {}
+
     async def start_login_session(
         self, 
         db: AsyncSession, 
@@ -50,8 +53,15 @@ class AccountService:
         account.storage_path = str(settings.SESSIONS_DIR / account.id)
         await db.commit()
 
-        # 2. 异步启动扫码流程
-        asyncio.create_task(self._run_login_pipeline(account.id, platform, proxy_url))
+        # 2. 中止该账号可能存在的历史残留任务并释放文件锁
+        old_task = self._active_tasks.pop(account.id, None)
+        if old_task and not old_task.done():
+            old_task.cancel()
+        await playwright_driver.close_account_context(account.id)
+
+        # 3. 异步启动扫码流程
+        task = asyncio.create_task(self._run_login_pipeline(account.id, platform, proxy_url))
+        self._active_tasks[account.id] = task
 
         return {
             "account_id": account.id,
@@ -72,7 +82,7 @@ class AccountService:
                 proxy_url=proxy_url
             )
 
-            # 获取二维码并推流到前端
+            # 获取二维码并推流到前端 (耗时约 1~2 秒)
             qrcode_b64 = await adapter.get_login_qrcode(page)
             if qrcode_b64:
                 await event_bus.broadcast("qrcode_updated", {
@@ -84,21 +94,21 @@ class AccountService:
             else:
                 await event_bus.emit_log(f"获取二维码超时或需要人机验证，请尝试使用【人工辅助】窗口登录", level="WARNING", account_id=account_id)
 
-            # 等待扫码确认
+            # 等待扫码确认 (仅静默检测 URL 跳转，绝不打断页面)
             logged_in, user_info = await adapter.wait_for_login(page, timeout=120)
 
-            # 无论成功与否，持久化 session 凭证
-            account_dir = settings.SESSIONS_DIR / account_id
-            account_dir.mkdir(parents=True, exist_ok=True)
-            storage_file = account_dir / "storage_state.json"
-            await context.storage_state(path=str(storage_file))
+            if logged_in:
+                # 只有确认成功登录，才持久化会话凭证
+                account_dir = settings.SESSIONS_DIR / account_id
+                account_dir.mkdir(parents=True, exist_ok=True)
+                storage_file = account_dir / "storage_state.json"
+                await context.storage_state(path=str(storage_file))
 
-            from app.core.database import AsyncSessionLocal
-            async with AsyncSessionLocal() as session:
-                res = await session.execute(select(Account).where(Account.id == account_id))
-                acc = res.scalar_one_or_none()
-                if acc:
-                    if logged_in:
+                from app.core.database import AsyncSessionLocal
+                async with AsyncSessionLocal() as session:
+                    res = await session.execute(select(Account).where(Account.id == account_id))
+                    acc = res.scalar_one_or_none()
+                    if acc:
                         acc.status = "active"
                         acc.last_login_at = datetime.utcnow()
                         acc.last_check_at = datetime.utcnow()
@@ -109,14 +119,24 @@ class AccountService:
                         await session.commit()
                         await event_bus.emit_log(f"恭喜！【{acc.account_name}】授权登录成功！", level="SUCCESS", account_id=account_id)
                         await event_bus.broadcast("account_status_changed", acc.to_dict())
-                    else:
+            else:
+                # 超时未扫码：先查询当前账号是否已经被人工辅助窗口登录激活过，避免错误覆盖有效状态
+                from app.core.database import AsyncSessionLocal
+                async with AsyncSessionLocal() as session:
+                    res = await session.execute(select(Account).where(Account.id == account_id))
+                    acc = res.scalar_one_or_none()
+                    if acc and acc.status != "active":
                         acc.status = "unauthorized"
                         await session.commit()
                         await event_bus.emit_log(f"扫码超时或取消，请重试登录", level="WARNING", account_id=account_id)
+                        await event_bus.broadcast("account_status_changed", acc.to_dict())
 
+        except asyncio.CancelledError:
+            pass  # 任务被正常取消（如切换到人工辅助）
         except Exception as e:
             await event_bus.emit_log(f"登录流程发生异常: {str(e)}", level="ERROR", account_id=account_id)
         finally:
+            self._active_tasks.pop(account_id, None)
             if context:
                 await playwright_driver.close_context(context, page)
 
@@ -153,44 +173,105 @@ class AccountService:
         finally:
             await playwright_driver.close_context(context, page)
 
-    async def launch_visible_assist(self, db: AsyncSession, account_id: str):
+    async def launch_visible_assist(self, account_id: str):
         """
-        在宿主机桌面唤起有头浏览器窗口，方便人工滑动滑块或输入短信验证码
+        在宿主机桌面唤起有头浏览器窗口，供人工滑动验证码或短信/扫码登录，
+        并在检测到登录完成后自动保存会话、同步状态到前端并关闭窗口。
         """
-        res = await db.execute(select(Account).where(Account.id == account_id))
-        account = res.scalar_one_or_none()
-        if not account:
-            raise ValueError("账号不存在")
+        from app.core.database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            res = await session.execute(select(Account).where(Account.id == account_id))
+            account = res.scalar_one_or_none()
+            if not account:
+                raise ValueError("账号不存在")
+            platform = account.platform
+            proxy_url = account.proxy_url
+            account_status = account.status
+            account_name = account.account_name
 
-        adapter = get_adapter(account.platform)
-        await event_bus.emit_log("正在本地桌面唤起独立辅助浏览器窗口，请在弹出的窗口中操作...", account_id=account_id)
+        # 1. 优先中断该账号可能在后台排队的无头扫码任务并释放文件锁
+        old_task = self._active_tasks.pop(account_id, None)
+        if old_task and not old_task.done():
+            old_task.cancel()
+        await playwright_driver.close_account_context(account_id)
+        await asyncio.sleep(1)
+
+        adapter = get_adapter(platform)
+        await event_bus.emit_log("正在本地桌面唤起独立辅助浏览器窗口，请在弹窗中操作...", account_id=account_id)
         
-        # 启动非无头 (有头) 浏览器窗口
         context, page = await playwright_driver.get_context_and_page(
-            account_id=account.id,
+            account_id=account_id,
             headless=False,
-            proxy_url=account.proxy_url
+            proxy_url=proxy_url
         )
         try:
-            await page.goto(adapter.creator_url)
-            # 等待用户在可见窗口中操作完成 (最多保持 300 秒或检测到成功登录)
-            for _ in range(60):
-                await asyncio.sleep(5)
+            # 访问登录页（未登录）或创作者首页
+            target_url = adapter.login_url if account_status != "active" else adapter.creator_url
+            await page.goto(target_url, timeout=30000, wait_until="domcontentloaded")
+
+            login_detected = False
+            for _ in range(150):  # 最多等待 300 秒
+                await asyncio.sleep(2)
                 if page.is_closed():
                     break
-                is_valid, user_info = await adapter.check_login_status(page)
-                if is_valid:
-                    account.status = "active"
-                    account.last_login_at = datetime.utcnow()
-                    account.last_check_at = datetime.utcnow()
-                    if user_info and user_info.get("name"):
-                        account.account_name = user_info["name"]
-                    await db.commit()
-                    # 导出持久化凭证
-                    storage_file = settings.SESSIONS_DIR / account.id / "storage_state.json"
-                    await context.storage_state(path=str(storage_file))
-                    await event_bus.emit_log(f"人工辅助验证通过，【{account.account_name}】状态已更新！", level="SUCCESS", account_id=account_id)
+                
+                # 监听页面 URL：若跳转进入后台，则说明扫码/过滑块成功
+                curr_url = page.url
+                if "login" not in curr_url and any(k in curr_url for k in ["creator", "home", "micro", "platform"]):
+                    login_detected = True
+                    await asyncio.sleep(1.5)
                     break
+
+                # 探测页面是否已出现创作者主页元素
+                try:
+                    success_indicator = await page.query_selector(".user-info, .header-avatar, .con-name, .name-box, [class*='avatar']")
+                    if success_indicator and await success_indicator.is_visible():
+                        login_detected = True
+                        await asyncio.sleep(1.5)
+                        break
+                except Exception:
+                    pass
+
+            # 即使页面被关闭，也检查 cookies 兜底识别
+            try:
+                cookies = await context.cookies()
+                has_session = any(
+                    any(term in c["name"].lower() for term in ["session", "token", "a1", "sso", "passport", "login", "auth"])
+                    for c in cookies
+                )
+                if has_session:
+                    login_detected = True
+            except Exception:
+                pass
+
+            if login_detected:
+                # 导出并持久化 StorageState
+                account_dir = settings.SESSIONS_DIR / account_id
+                account_dir.mkdir(parents=True, exist_ok=True)
+                storage_file = account_dir / "storage_state.json"
+                try:
+                    await context.storage_state(path=str(storage_file))
+                except Exception:
+                    pass
+
+                async with AsyncSessionLocal() as session:
+                    acc_res = await session.execute(select(Account).where(Account.id == account_id))
+                    acc = acc_res.scalar_one_or_none()
+                    if acc:
+                        acc.status = "active"
+                        acc.last_login_at = datetime.utcnow()
+                        acc.last_check_at = datetime.utcnow()
+                        if not page.is_closed():
+                            try:
+                                info = await adapter._extract_user_info_from_page(page)
+                                if info and info.get("name"):
+                                    acc.account_name = info["name"]
+                            except Exception:
+                                pass
+                        await session.commit()
+                        await event_bus.emit_log(f"人工辅助验证通过，【{acc.account_name}】状态已自动同步！", level="SUCCESS", account_id=account_id)
+                        await event_bus.broadcast("account_status_changed", acc.to_dict())
+                        await asyncio.sleep(2)
         finally:
             await playwright_driver.close_context(context, page)
 
