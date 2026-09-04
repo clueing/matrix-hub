@@ -16,7 +16,7 @@ UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 class Settings(BaseSettings):
     APP_NAME: str = "matrix-hub"
     APP_VERSION: str = "0.1.0"
-    DEBUG: bool = True
+    DEBUG: bool = False
     HOST: str = "127.0.0.1"
     PORT: int = 8000
     

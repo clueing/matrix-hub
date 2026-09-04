@@ -12,10 +12,13 @@ from app.services.scheduler_service import scheduler_service
 from app.drivers.playwright_driver import playwright_driver
 
 import sys
+import asyncio
 if sys.platform == "win32":
     try:
         sys.stdout.reconfigure(encoding="utf-8")
         sys.stderr.reconfigure(encoding="utf-8")
+        # 必须使用 Proactor 事件循环策略以支持 Playwright 异步子进程
+        asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
     except Exception:
         pass
 
