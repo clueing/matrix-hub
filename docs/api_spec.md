@@ -65,6 +65,36 @@
 - **路径**：`PATCH /api/accounts/{account_id}` (修改分组名称、代理等)
 - **路径**：`DELETE /api/accounts/{account_id}` (删除账号及其本地 session 文件)
 
+### 2.6 导出账号凭证
+- **路径**：`GET /api/accounts/{account_id}/export`
+- **说明**：将指定账号的元数据与 `storage_state.json` 打包导出为 ZIP 文件，支持下载备份或跨机迁移。
+- **批量导出路径**：`POST /api/accounts/export-batch`，请求体包含 `account_ids: ["id1", "id2"]`，返回包含多个账号的批量备份压缩包。
+
+### 2.7 导入账号凭证
+- **路径**：`POST /api/accounts/import`
+- **请求类型**：`multipart/form-data`
+- **参数**：
+  - `file`: 上传的账号备份 ZIP 或 JSON 文件
+  - `overwrite`: 布尔值，当账号 UID 已存在时是否覆盖已有会话（默认 `true`）
+- **返回**：
+```json
+{
+  "code": 0,
+  "data": {
+    "imported_count": 1,
+    "accounts": [
+      {
+        "id": "uuid-account-xxx",
+        "platform": "xiaohongshu",
+        "account_name": "小红书大号",
+        "status": "active"
+      }
+    ]
+  }
+}
+```
+- **说明**：系统将解包并写入对应的 `data/sessions/{account_id}/`，自动向数据库注册，并在后台异步触发一次健康心跳检测。
+
 ---
 
 ## 3. 发布任务接口 (`/api/tasks`)
