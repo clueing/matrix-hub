@@ -328,6 +328,7 @@ const initWebSocket = () => {
 
       // 触发二次安全验证弹窗
       if (msg.event === 'verification_required') {
+        console.log('[VerificationDialog] Received verification_required:', msg.data)
         openWithData(msg.data)
       }
       // 验证码错误
