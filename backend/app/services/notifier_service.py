@@ -20,9 +20,13 @@ class NotifierService:
         webhook_url = None
         channel = "feishu"
 
-        if db:
-            webhook_url = await self.get_setting(db, "webhook_url")
-            channel = (await self.get_setting(db, "webhook_channel")) or "feishu"
+        try:
+            from app.core.database import AsyncSessionLocal
+            async with AsyncSessionLocal() as session:
+                webhook_url = await self.get_setting(session, "webhook_url")
+                channel = (await self.get_setting(session, "webhook_channel")) or "feishu"
+        except Exception:
+            return
 
         if not webhook_url:
             return  # 未配置 webhook 则静默跳过
