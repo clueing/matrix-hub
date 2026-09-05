@@ -16,112 +16,205 @@
     <!-- 步骤一：素材选择 -->
     <el-card shadow="never" class="mb-4">
       <template #header>
-        <div class="font-bold flex items-center gap-2">
-          <el-tag effect="dark">步骤 1</el-tag> 视频素材准备
+        <div class="font-bold flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <el-tag effect="dark">步骤 1</el-tag> 视频素材准备
+          </div>
+          <div v-if="taskType === 'one_to_many' && singleVideoPath" class="text-xs text-green-600 flex items-center gap-1 font-normal">
+            <el-icon><CircleCheck /></el-icon> 视频素材已就绪
+          </div>
         </div>
       </template>
 
       <!-- 1对多模式下的视频选择 -->
       <div v-if="taskType === 'one_to_many'">
-        <el-form label-width="120px">
-          <el-form-item label="选择视频素材" required>
-            <div class="flex flex-col gap-3 w-full" style="max-width: 700px;">
-              <div class="flex items-center gap-3">
-                <el-button type="primary" size="large" @click="handlePickFile" :loading="pickingFile">
-                  <el-icon class="mr-1"><FolderOpened /></el-icon> 调起系统窗口选择视频
-                </el-button>
-                <el-upload
-                  action=""
-                  :auto-upload="false"
-                  :show-file-list="false"
-                  :on-change="handleBrowserFileSelect"
-                  accept="video/*,.mp4,.mov,.flv,.mkv,.webm"
-                >
-                  <el-button type="success" size="large">
-                    <el-icon class="mr-1"><Upload /></el-icon> 浏览器选择/上传视频
-                  </el-button>
-                </el-upload>
-              </div>
+        <!-- 状态 A：尚未选择视频素材时的 Dropzone 选择区 -->
+        <div 
+          v-if="!singleVideoPath"
+          class="video-picker-dropzone border-2 border-dashed border-slate-300 hover:border-blue-500 rounded-xl p-8 bg-slate-50/70 hover:bg-blue-50/20 transition-all text-center max-w-3xl cursor-pointer"
+          @dragover.prevent
+          @drop.prevent="handleDrop"
+        >
+          <div class="flex justify-center mb-3">
+            <div class="w-16 h-16 rounded-2xl bg-blue-100 flex items-center justify-center text-blue-600 shadow-sm">
+              <el-icon :size="32"><Film /></el-icon>
+            </div>
+          </div>
+          <div class="text-base font-bold text-slate-800 mb-1">选择或拖入本地原始视频</div>
+          <div class="text-xs text-slate-500 mb-5">
+            支持 MP4, MOV, FLV, MKV 等常见视频格式，系统将直接向矩阵平台原画分发
+          </div>
+          <div class="flex items-center justify-center gap-3 mb-3">
+            <el-button type="primary" size="default" :loading="pickingFile" @click.stop="handlePickFile">
+              <el-icon class="mr-1"><FolderOpened /></el-icon> 调起系统窗口选择
+            </el-button>
+            <el-upload
+              action=""
+              :auto-upload="false"
+              :show-file-list="false"
+              :on-change="handleBrowserFileSelect"
+              accept="video/*,.mp4,.mov,.flv,.mkv,.webm"
+            >
+              <el-button size="default" @click.stop>
+                <el-icon class="mr-1"><Upload /></el-icon> 浏览器选择/上传
+              </el-button>
+            </el-upload>
+          </div>
+          
+          <div class="text-xs text-slate-400 flex items-center justify-center gap-2">
+            <span>支持拖入视频文件到此区域</span>
+            <span class="text-slate-300">|</span>
+            <el-button link type="primary" size="small" @click.stop="showManualPath = !showManualPath">
+              {{ showManualPath ? '收起手动输入' : '手动输入/粘贴路径' }}
+            </el-button>
+          </div>
 
-              <!-- 拖拽上传区域 -->
+          <div v-if="showManualPath" class="mt-4 pt-4 border-t border-slate-200 text-left" @click.stop>
+            <el-input 
+              v-model="singleVideoPath" 
+              placeholder="输入本地视频绝对路径 (例如: D:\videos\my_vlog.mp4)" 
+              clearable
+              @change="handleVerifySingleVideo"
+            >
+              <template #append>
+                <el-button @click="handleVerifySingleVideo">校验并载入</el-button>
+              </template>
+            </el-input>
+          </div>
+        </div>
+
+        <!-- 状态 B：已选择视频素材后的就绪卡片 -->
+        <div 
+          v-else 
+          class="selected-video-card max-w-3xl p-5 bg-white border border-slate-200 rounded-xl shadow-sm hover:shadow-md transition"
+        >
+          <div class="flex items-start justify-between gap-4">
+            <div class="flex items-start gap-3.5 min-w-0">
+              <!-- 文件格式图徽 -->
+              <div class="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex flex-col items-center justify-center text-white shadow-sm flex-shrink-0">
+                <el-icon :size="18"><Film /></el-icon>
+                <span class="text-[9px] font-bold mt-0.5 tracking-wider uppercase">
+                  {{ getVideoExt(singleVideoPath) }}
+                </span>
+              </div>
+              
+              <!-- 视频详细元信息 -->
+              <div class="flex flex-col min-w-0">
+                <div class="flex items-center gap-2 flex-wrap">
+                  <span class="font-bold text-slate-800 text-base leading-snug truncate max-w-md">
+                    {{ singleVideoInfo?.name || getFileName(singleVideoPath) }}
+                  </span>
+                  <el-tag size="small" type="success" effect="light" class="font-medium">
+                    <el-icon class="mr-0.5"><CircleCheck /></el-icon> 校验通过
+                  </el-tag>
+                  <el-tag v-if="singleVideoInfo?.size_mb" size="small" type="info">
+                    {{ singleVideoInfo.size_mb }} MB
+                  </el-tag>
+                </div>
+                
+                <!-- 路径预览条 -->
+                <div class="mt-2 text-xs text-slate-500 bg-slate-50 px-2.5 py-1 rounded border border-slate-100 font-mono truncate max-w-lg select-all" :title="singleVideoPath">
+                  {{ singleVideoPath }}
+                </div>
+              </div>
+            </div>
+
+            <!-- 操作按钮组 -->
+            <div class="flex items-center gap-1.5 flex-shrink-0">
+              <el-button size="small" type="primary" plain :loading="pickingFile" @click="handlePickFile">
+                <el-icon class="mr-1"><FolderOpened /></el-icon> 更换
+              </el-button>
               <el-upload
-                class="video-uploader"
-                drag
                 action=""
                 :auto-upload="false"
                 :show-file-list="false"
                 :on-change="handleBrowserFileSelect"
                 accept="video/*,.mp4,.mov,.flv,.mkv,.webm"
               >
-                <el-icon class="el-icon--upload"><UploadFilled /></el-icon>
-                <div class="el-upload__text">
-                  将本地视频文件拖拽到此处，或 <em>点击上传</em>
-                </div>
-                <template #tip>
-                  <div class="el-upload__tip text-xs text-gray-400">
-                    支持 MP4, MOV, FLV, MKV 等格式原始视频
-                  </div>
-                </template>
+                <el-button size="small" plain>
+                  <el-icon class="mr-1"><Upload /></el-icon> 上传更换
+                </el-button>
               </el-upload>
+              <el-button size="small" type="danger" link @click="clearSelectedVideo">
+                清除
+              </el-button>
             </div>
-          </el-form-item>
+          </div>
 
-          <el-form-item label="已选视频路径">
+          <!-- 底部辅助说明与展开路径微调 -->
+          <div class="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between text-xs text-slate-400">
+            <span>零转码原片分发模式已就绪</span>
+            <el-button link type="primary" size="small" @click="showManualPath = !showManualPath">
+              {{ showManualPath ? '收起路径编辑' : '修改文件路径' }}
+            </el-button>
+          </div>
+          <div v-if="showManualPath" class="mt-2">
             <el-input 
               v-model="singleVideoPath" 
-              placeholder="通过上方按钮选择，或手动粘贴路径（如: D:\videos\my_vlog.mp4）" 
-              style="max-width: 700px;"
+              size="small"
+              placeholder="修改视频文件绝对路径" 
               clearable
               @change="handleVerifySingleVideo"
             >
               <template #append>
-                <el-button @click="handleVerifySingleVideo">校验文件</el-button>
+                <el-button size="small" @click="handleVerifySingleVideo">重新校验</el-button>
               </template>
             </el-input>
-          </el-form-item>
-
-          <el-form-item v-if="singleVideoInfo" label="视频信息">
-            <el-tag type="success" size="large">
-              <el-icon class="mr-1"><VideoPlay /></el-icon>
-              {{ singleVideoInfo.name }} ({{ singleVideoInfo.size_mb }} MB) - 文件可读正常
-            </el-tag>
-          </el-form-item>
-        </el-form>
+          </div>
+        </div>
       </div>
 
       <!-- 多对多模式下的文件夹扫描批量导入 -->
-      <div v-else>
-        <el-form label-width="120px">
-          <el-form-item label="选择素材文件夹" required>
-            <div class="flex items-center gap-3 w-full" style="max-width: 700px;">
-              <el-button type="primary" size="large" @click="handlePickFolder" :loading="pickingFolder">
-                <el-icon class="mr-1"><FolderOpened /></el-icon> 调起系统窗口选择文件夹
+      <div v-else class="folder-picker-section max-w-3xl">
+        <div class="p-5 bg-white border border-slate-200 rounded-xl shadow-sm mb-4">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-3">
+              <div class="w-11 h-11 rounded-xl bg-amber-100 flex items-center justify-center text-amber-600 flex-shrink-0">
+                <el-icon :size="22"><FolderOpened /></el-icon>
+              </div>
+              <div>
+                <div class="font-bold text-slate-800 text-sm">选择素材存放文件夹</div>
+                <div class="text-xs text-slate-500 mt-0.5">系统将自动检索目录下的所有有效视频文件</div>
+              </div>
+            </div>
+            <div class="flex items-center gap-2">
+              <el-button type="primary" size="default" :loading="pickingFolder" @click="handlePickFolder">
+                <el-icon class="mr-1"><FolderOpened /></el-icon> 调起系统选择文件夹
+              </el-button>
+              <el-button v-if="folderPath" size="default" :loading="scanning" @click="handleScanFolder">
+                重新扫描
               </el-button>
             </div>
-          </el-form-item>
+          </div>
 
-          <el-form-item label="文件夹绝对路径">
+          <div class="mt-3">
             <el-input 
               v-model="folderPath" 
-              placeholder="通过上方按钮选择，或手动粘贴路径（如: D:\my_channel_videos）" 
-              style="max-width: 700px;"
+              placeholder="通过上方按钮选择，或手动粘贴文件夹路径 (如 D:\my_channel_videos)" 
               clearable
+              @change="handleScanFolder"
             >
-              <template #append>
-                <el-button type="primary" :loading="scanning" @click="handleScanFolder">重新扫描</el-button>
+              <template #prefix>
+                <el-icon class="text-gray-400"><FolderOpened /></el-icon>
               </template>
             </el-input>
-          </el-form-item>
-        </el-form>
+          </div>
+        </div>
 
-        <div v-if="scannedVideos.length > 0" class="mt-3">
-          <div class="text-sm font-medium mb-2 text-gray-700">检索到 {{ scannedVideos.length }} 个视频素材：</div>
-          <el-table :data="scannedVideos" max-height="240" size="small" border>
-            <el-table-column prop="name" label="文件名" min-width="200" />
-            <el-table-column prop="size_mb" label="大小" width="100" align="center">
+        <div v-if="scannedVideos.length > 0" class="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
+          <div class="flex items-center justify-between mb-3">
+            <div class="text-sm font-bold text-slate-700 flex items-center gap-2">
+              <span>检索到的视频素材清单</span>
+              <el-tag type="success" size="small">{{ scannedVideos.length }} 个视频</el-tag>
+            </div>
+            <span class="text-xs text-slate-400">将按账号勾选顺序自动一对一配对</span>
+          </div>
+          <el-table :data="scannedVideos" max-height="240" size="small" stripe border>
+            <el-table-column prop="name" label="文件名" min-width="180" show-overflow-tooltip />
+            <el-table-column prop="size_mb" label="大小" width="90" align="center">
               <template #default="{ row }">{{ row.size_mb }} MB</template>
             </el-table-column>
-            <el-table-column prop="path" label="完整绝对路径" min-width="300" show-overflow-tooltip />
+            <el-table-column prop="path" label="完整绝对路径" min-width="260" show-overflow-tooltip />
           </el-table>
         </div>
       </div>
@@ -280,7 +373,7 @@
 import { ref, onMounted } from "vue"
 import { useRouter } from "vue-router"
 import { ElMessage } from "element-plus"
-import { Check, FolderOpened, Upload, VideoPlay, UploadFilled } from "@element-plus/icons-vue"
+import { Check, FolderOpened, Upload, Film, CircleCheck } from "@element-plus/icons-vue"
 import { 
   getAccounts, scanFolder, verifyVideo, createTask, 
   pickLocalFile, pickLocalFolder, uploadVideoFile 
@@ -292,6 +385,30 @@ const taskType = ref("one_to_many")
 const singleVideoPath = ref("")
 const singleVideoInfo = ref<any>(null)
 const pickingFile = ref(false)
+const showManualPath = ref(false)
+
+const getVideoExt = (path: string) => {
+  if (!path) return "MP4"
+  const ext = path.split(".").pop()
+  return ext ? ext.toUpperCase() : "MP4"
+}
+
+const getFileName = (path: string) => {
+  if (!path) return ""
+  return path.replace(/\\/g, "/").split("/").pop() || path
+}
+
+const clearSelectedVideo = () => {
+  singleVideoPath.value = ""
+  singleVideoInfo.value = null
+  buildSubtaskItems()
+}
+
+const handleDrop = (e: DragEvent) => {
+  if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+    handleBrowserFileSelect({ raw: e.dataTransfer.files[0] })
+  }
+}
 
 const folderPath = ref("")
 const scanning = ref(false)
