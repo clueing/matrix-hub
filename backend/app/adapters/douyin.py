@@ -67,42 +67,97 @@ class DouyinAdapter(BasePublisherAdapter):
             return False, None
 
     async def get_login_qrcode(self, page: Page) -> Optional[str]:
-        """进入抖音登录页面，快速定位并截取扫码二维码"""
+        """进入抖音登录页面，快速定位并截取真实的扫码二维码 (排除 SVG 卡片背景图)"""
         try:
-            await page.goto(self.login_url, timeout=20000, wait_until="domcontentloaded")
-            
-            # 优先等待带 data:image 或 qrcode 的图片
-            try:
-                qr_img = await page.wait_for_selector("img[src*='data:image'], .qrcode-image, img[class*='qrcode']", timeout=8000)
-                if qr_img:
-                    src = await qr_img.get_attribute("src")
-                    if src and src.startswith("data:image"):
-                        return src
-                    img_bytes = await qr_img.screenshot()
-                    b64 = base64.b64encode(img_bytes).decode("utf-8")
-                    return f"data:image/png;base64,{b64}"
-            except Exception:
-                pass
+            await page.goto(self.login_url, timeout=25000, wait_until="domcontentloaded")
+            await asyncio.sleep(1.5)
 
-            # 备用选择器
-            qr_selectors = [
-                "img[class*='qrcode']", ".qrcode-image", "canvas",
-                "div[class*='qrcode-box']", "div[class*='qrcode-wrapper']",
-                ".login-guide-card img"
+            # 1. 优先使用抖音专属扫码容器高精度定位（避免误判外层带有 data:image 的 SVG 文件夹卡片背景）
+            targeted_selectors = [
+                "#animate_qrcode_container img",
+                "#douyin_login_comp_scan_code img",
+                "div[id*='scan_code'] img",
+                "div[id*='qrcode'] img",
+                "div[class*='qrcode'] img",
+                "div[class*='scan'] img"
             ]
-            for sel in qr_selectors:
-                el = await page.query_selector(sel)
-                if el and await el.is_visible():
-                    img_bytes = await el.screenshot()
+            for sel in targeted_selectors:
+                try:
+                    el = await page.wait_for_selector(sel, timeout=3000)
+                    if el and await el.is_visible():
+                        box = await el.bounding_box()
+                        if box and 100 <= box["width"] <= 350 and 100 <= box["height"] <= 350:
+                            src = await el.get_attribute("src")
+                            if src and ("image/png" in src or "image/jpeg" in src):
+                                return src
+                            # 若非标准 data URI，对该正方形二维码元素进行高清截图
+                            img_bytes = await el.screenshot()
+                            b64 = base64.b64encode(img_bytes).decode("utf-8")
+                            return f"data:image/png;base64,{b64}"
+                except Exception:
+                    continue
+
+            # 2. 检查是否有渲染在 canvas 上的二维码
+            canvas_selectors = [
+                "#animate_qrcode_container canvas",
+                "#douyin_login_comp_scan_code canvas",
+                "canvas"
+            ]
+            for sel in canvas_selectors:
+                try:
+                    c = await page.query_selector(sel)
+                    if c and await c.is_visible():
+                        box = await c.bounding_box()
+                        if box and 100 <= box["width"] <= 350 and 100 <= box["height"] <= 350:
+                            img_bytes = await c.screenshot()
+                            b64 = base64.b64encode(img_bytes).decode("utf-8")
+                            return f"data:image/png;base64,{b64}"
+                except Exception:
+                    continue
+
+            # 3. 兜底扫描页面所有图片，严格排除 SVG 卡片背景及非正方形图标
+            imgs = await page.query_selector_all("img")
+            for img in imgs:
+                try:
+                    if not await img.is_visible():
+                        continue
+                    box = await img.bounding_box()
+                    if not box:
+                        continue
+                    # 二维码必须满足：正方形且尺寸在 110~300px 之间
+                    is_square = abs(box["width"] - box["height"]) <= 20
+                    is_valid_size = 110 <= box["width"] <= 300 and 110 <= box["height"] <= 300
+                    if not (is_square and is_valid_size):
+                        continue
+
+                    src = await img.get_attribute("src") or ""
+                    cls = await img.get_attribute("class") or ""
+                    # 严防 SVG 背景大图或非二维码装饰
+                    if "svg" in src or "bg" in cls.lower() or "background" in cls.lower():
+                        continue
+
+                    if src.startswith("data:image/png") or src.startswith("data:image/jpeg"):
+                        return src
+
+                    img_bytes = await img.screenshot()
                     b64 = base64.b64encode(img_bytes).decode("utf-8")
                     return f"data:image/png;base64,{b64}"
+                except Exception:
+                    continue
 
-            # 兜底：截图登录卡片区
-            login_card = await page.query_selector(".login-card, div[class*='login-panel']")
-            if login_card:
-                img_bytes = await login_card.screenshot()
-                b64 = base64.b64encode(img_bytes).decode("utf-8")
-                return f"data:image/png;base64,{b64}"
+            # 4. 再次兜底：直接对扫码容器进行截图
+            containers = ["#animate_qrcode_container", "#douyin_login_comp_scan_code", "div[id*='scan_code']"]
+            for c_sel in containers:
+                try:
+                    c_el = await page.query_selector(c_sel)
+                    if c_el and await c_el.is_visible():
+                        box = await c_el.bounding_box()
+                        if box and 100 <= box["width"] <= 350 and 100 <= box["height"] <= 350:
+                            img_bytes = await c_el.screenshot()
+                            b64 = base64.b64encode(img_bytes).decode("utf-8")
+                            return f"data:image/png;base64,{b64}"
+                except Exception:
+                    continue
 
             return None
         except Exception:
