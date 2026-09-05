@@ -1,35 +1,34 @@
 @echo off
-chcp 65001 >nul
-title matrix-hub å¤šè´¦å·çŸ©é˜µåˆ†å‘å¹³å°
+title MatrixHub ¶àÕËºÅ¾ØÕó·Ö·¢Æ½Ì¨
 
 echo ========================================================
-echo   matrix-hub è‡ªåª’ä½“å¤šè´¦å·çŸ©é˜µåˆ†å‘å¹³å°æ­£åœ¨å¯åŠ¨...
+echo   MatrixHub ×ÔÃ½Ìå¶àÕËºÅ¾ØÕó·Ö·¢Æ½Ì¨ÕıÔÚÆô¶¯...
 echo ========================================================
 
-REM 1. æ£€æŸ¥ Python è™šæ‹Ÿç¯å¢ƒ
+REM 1. ¼ì²é Python ĞéÄâ»·¾³
 if not exist ".venv" (
-    echo [INFO] æ­£åœ¨åˆå§‹åŒ– Python è™šæ‹Ÿç¯å¢ƒ...
+    echo [INFO] ÕıÔÚ³õÊ¼»¯ Python ĞéÄâ»·¾³...
     python -m venv .venv
     call .venv\Scripts\activate.bat
-    echo [INFO] æ­£åœ¨å®‰è£… Python ä¾èµ–åº“...
+    echo [INFO] ÕıÔÚ°²×° Python ÒÀÀµ¿â...
     pip install -r backend/requirements.txt
     playwright install chromium
 )
 
-REM 2. æ£€æŸ¥å‰ç«¯é™æ€äº§ç‰©
+REM 2. ¼ì²éÇ°¶Ë¾²Ì¬²úÎï
 if not exist "frontend\dist" (
-    echo [INFO] æ£€æµ‹åˆ°å‰ç«¯å°šæœªæ„å»ºï¼Œæ­£åœ¨ä½¿ç”¨ pnpm æ„å»ºå‰ç«¯äº§ç‰©...
+    echo [INFO] ¼ì²âµ½Ç°¶ËÉĞÎ´¹¹½¨£¬ÕıÔÚÊ¹ÓÃ pnpm ¹¹½¨Ç°¶Ë²úÎï...
     cd frontend
     call pnpm install --ignore-scripts
     call pnpm build
     cd ..
 )
 
-REM 3. è‡ªåŠ¨åœ¨ç³»ç»Ÿé»˜è®¤æµè§ˆå™¨ä¸­æ‰“å¼€æ§åˆ¶å°
+REM 3. ×Ô¶¯ÔÚÏµÍ³Ä¬ÈÏä¯ÀÀÆ÷ÖĞ´ò¿ª¿ØÖÆÌ¨
 start http://127.0.0.1:8000
 
-REM 4. å¯åŠ¨åç«¯æ ¸å¿ƒæœåŠ¡
-echo [OK] æ­£åœ¨å¯åŠ¨æ ¸å¿ƒæœåŠ¡ï¼Œè¯·ä¿æŒæœ¬çª—å£è¿è¡Œ...
+REM 4. Æô¶¯ºó¶ËºËĞÄ·şÎñ
+echo [OK] ÕıÔÚÆô¶¯ºËĞÄ·şÎñ£¬Çë±£³Ö±¾´°¿ÚÔËĞĞ...
 .venv\Scripts\python.exe backend\run.py
 
 pause
