@@ -2,11 +2,9 @@
   <el-container class="app-layout">
     <!-- 侧边栏导航 -->
     <el-aside width="240px" class="aside-menu">
-      <div class="brand-logo">
-        <img src="./assets/logo.svg" alt="MatrixHub" class="logo-img" />
-        <span class="logo-text">MatrixHub</span>
+      <div class="brand-area">
+        <img src="./assets/logo.png" alt="MatrixHub" class="brand-logo-img" />
       </div>
-      <div class="brand-sub">自媒体多账号矩阵分发平台</div>
 
       <el-menu
         :default-active="$route.path"
@@ -98,29 +96,26 @@ body {
   flex-direction: column;
   border-right: 1px solid #1e293b;
 }
-.brand-logo {
-  padding: 24px 20px 4px 20px;
+.brand-area {
+  padding: 16px 14px 12px 14px;
   display: flex;
+  justify-content: center;
   align-items: center;
-  gap: 10px;
+  border-bottom: 1px solid #1e293b;
+  background: radial-gradient(circle at center top, rgba(56, 189, 248, 0.08) 0%, transparent 70%);
 }
-.logo-img {
-  width: 32px;
-  height: 32px;
-  flex-shrink: 0;
-  border-radius: 8px;
-  box-shadow: 0 0 12px rgba(56, 189, 248, 0.3);
+.brand-logo-img {
+  width: 100%;
+  max-width: 185px;
+  height: auto;
+  object-fit: contain;
+  filter: drop-shadow(0 4px 16px rgba(56, 189, 248, 0.25));
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), filter 0.25s ease;
+  user-select: none;
 }
-.logo-text {
-  font-size: 20px;
-  font-weight: bold;
-  color: #f8fafc;
-  letter-spacing: 0.5px;
-}
-.brand-sub {
-  padding: 0 20px 20px 20px;
-  font-size: 11px;
-  color: #64748b;
+.brand-logo-img:hover {
+  transform: scale(1.03);
+  filter: drop-shadow(0 6px 20px rgba(56, 189, 248, 0.45));
 }
 .el-menu-vertical {
   border-right: none;
