@@ -2,8 +2,16 @@
   <el-container class="app-layout">
     <!-- 侧边栏导航 -->
     <el-aside width="240px" class="aside-menu">
+      <!-- 平台品牌区 (与右侧 Header 保持 60px 等高对齐) -->
       <div class="brand-area">
         <img src="./assets/logo.png" alt="MatrixHub" class="brand-logo-img" />
+        <div class="brand-info">
+          <div class="brand-title-row">
+            <span class="brand-title">MatrixHub</span>
+            <span class="brand-badge">矩阵</span>
+          </div>
+          <div class="brand-subtitle">多账号矩阵分发平台</div>
+        </div>
       </div>
 
       <el-menu
@@ -97,25 +105,69 @@ body {
   border-right: 1px solid #1e293b;
 }
 .brand-area {
-  padding: 12px 16px;
+  height: 60px;
+  box-sizing: border-box;
+  padding: 0 14px;
   display: flex;
-  justify-content: center;
   align-items: center;
+  gap: 10px;
   border-bottom: 1px solid #1e293b;
-  background: radial-gradient(circle at center top, rgba(56, 189, 248, 0.08) 0%, transparent 70%);
+  background: radial-gradient(circle at left top, rgba(56, 189, 248, 0.1) 0%, transparent 80%);
 }
 .brand-logo-img {
+  height: 38px;
   width: auto;
-  max-width: 120px;
-  height: 64px;
+  max-width: 44px;
   object-fit: contain;
-  filter: drop-shadow(0 2px 10px rgba(56, 189, 248, 0.25));
-  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), filter 0.25s ease;
+  flex-shrink: 0;
+  filter: drop-shadow(0 2px 8px rgba(56, 189, 248, 0.3));
+  transition: transform 0.2s ease;
   user-select: none;
 }
 .brand-logo-img:hover {
-  transform: scale(1.04);
-  filter: drop-shadow(0 4px 14px rgba(56, 189, 248, 0.4));
+  transform: scale(1.06);
+}
+.brand-info {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+}
+.brand-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  line-height: 1.2;
+}
+.brand-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #ffffff;
+  letter-spacing: 0.5px;
+}
+.brand-badge {
+  font-size: 10px;
+  font-weight: 600;
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.15);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  padding: 0 4px;
+  border-radius: 4px;
+  line-height: 14px;
+  height: 15px;
+  display: inline-flex;
+  align-items: center;
+}
+.brand-subtitle {
+  font-size: 11px;
+  color: #94a3b8;
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  letter-spacing: 0.2px;
 }
 .el-menu-vertical {
   border-right: none;
@@ -149,6 +201,7 @@ body {
 }
 .app-header {
   height: 60px;
+  box-sizing: border-box;
   background: #ffffff;
   border-bottom: 1px solid #e2e8f0;
   display: flex;
