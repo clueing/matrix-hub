@@ -29,30 +29,28 @@
       <el-col :span="8" v-for="acc in accounts" :key="acc.id" class="mb-4">
         <el-card shadow="hover" class="account-card">
           <!-- 头部：头像、账号名、平台徽标与在线状态 -->
-          <div class="flex justify-between items-start mb-3">
-            <div class="flex items-center gap-3 min-w-0">
+          <div class="card-header-row">
+            <div class="account-profile">
               <el-avatar 
-                :size="52" 
+                :size="48" 
                 :src="acc.avatar_url" 
-                class="account-avatar shadow-sm border border-slate-200 flex-shrink-0"
+                class="account-avatar"
               >
                 {{ acc.account_name ? acc.account_name.slice(0, 2) : "平台" }}
               </el-avatar>
-              <div class="min-w-0">
-                <div class="font-bold text-base flex items-center gap-2 truncate">
-                  <span class="truncate" :title="acc.account_name">{{ acc.account_name }}</span>
-                  <el-tag size="small" :type="getPlatformTagType(acc.platform)" effect="light" class="flex-shrink-0">
+              <div class="account-titles">
+                <div class="account-name-line">
+                  <span class="account-name" :title="acc.account_name">{{ acc.account_name }}</span>
+                  <el-tag size="small" :type="getPlatformTagType(acc.platform)" effect="light">
                     {{ getPlatformLabel(acc.platform) }}
                   </el-tag>
                 </div>
-                <div class="text-xs text-gray-400 mt-1 flex items-center gap-2">
-                  <span class="bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded text-[11px]">
-                    {{ acc.group_name }}
-                  </span>
+                <div class="account-group-line">
+                  <span class="group-tag">{{ acc.group_name }}</span>
                 </div>
               </div>
             </div>
-            <div class="flex-shrink-0">
+            <div class="status-badge-wrap">
               <el-tag v-if="acc.status === 'active'" type="success" effect="dark" size="small">在线有效</el-tag>
               <el-tag v-else-if="acc.status === 'expired'" type="danger" effect="dark" size="small">登录失效</el-tag>
               <el-tag v-else type="info" size="small">未授权</el-tag>
@@ -60,10 +58,10 @@
           </div>
 
           <!-- 账号 ID / UID 识别条 -->
-          <div class="uid-strip mb-3 bg-slate-50 px-2.5 py-1.5 rounded flex items-center justify-between text-xs text-slate-500 border border-slate-100">
-            <div class="flex items-center gap-1.5 truncate">
-              <span class="text-slate-400 font-mono">ID:</span>
-              <span class="font-mono font-medium text-slate-700 select-all truncate">
+          <div class="uid-strip">
+            <div class="uid-content">
+              <span class="uid-prefix">UID:</span>
+              <span class="uid-text" :title="acc.uid || '未获取'">
                 {{ acc.uid || "未获取 (点击检测同步)" }}
               </span>
             </div>
@@ -72,7 +70,7 @@
               size="small" 
               type="primary" 
               link 
-              class="!p-0 text-xs flex-shrink-0"
+              class="copy-btn"
               @click="copyText(acc.uid)"
             >
               复制
@@ -80,35 +78,38 @@
           </div>
 
           <!-- 3列数据指标统计条 (粉丝数、点赞数、关注数) -->
-          <div class="stats-grid grid grid-cols-3 gap-2 mb-3 bg-slate-50/80 p-2.5 rounded-lg border border-slate-100 text-center">
+          <div class="stats-bar">
             <div class="stat-col">
-              <div class="stat-num text-sm font-bold text-slate-800 font-mono">
+              <div class="stat-number text-followers">
                 {{ formatCount(acc.followers_count) }}
               </div>
-              <div class="stat-label text-[11px] text-slate-400 mt-0.5">粉丝数量</div>
+              <div class="stat-title">粉丝数量</div>
             </div>
-            <div class="stat-col border-x border-slate-200/60">
-              <div class="stat-num text-sm font-bold text-rose-600 font-mono">
+            <div class="stat-divider"></div>
+            <div class="stat-col">
+              <div class="stat-number text-likes">
                 {{ formatCount(acc.likes_count) }}
               </div>
-              <div class="stat-label text-[11px] text-slate-400 mt-0.5">获赞与收藏</div>
+              <div class="stat-title">获赞与收藏</div>
             </div>
+            <div class="stat-divider"></div>
             <div class="stat-col">
-              <div class="stat-num text-sm font-bold text-slate-700 font-mono">
+              <div class="stat-number text-following">
                 {{ formatCount(acc.following_count) }}
               </div>
-              <div class="stat-label text-[11px] text-slate-400 mt-0.5">关注数量</div>
+              <div class="stat-title">关注数量</div>
             </div>
           </div>
 
-          <div class="account-meta text-[11px] text-gray-400 mb-3 flex items-center justify-between">
+          <!-- 检测时间与状态 -->
+          <div class="account-meta">
             <span>最近检测: {{ acc.last_check_at ? acc.last_check_at.slice(0, 16).replace('T', ' ') : "未检测" }}</span>
-            <span v-if="checkingAccountId === acc.id" class="text-blue-500 font-medium">正在同步数据...</span>
+            <span v-if="checkingAccountId === acc.id" class="text-loading">正在同步数据...</span>
           </div>
 
           <!-- 操作按钮组 -->
-          <div class="flex justify-between items-center border-t pt-3">
-            <div class="flex gap-1">
+          <div class="card-footer">
+            <div class="action-btns">
               <el-button 
                 size="small" 
                 type="primary" 
@@ -501,32 +502,190 @@ onUnmounted(() => {
 
 <style scoped>
 .accounts-container { padding: 10px 0; }
-.account-card { border-radius: 8px; }
+.account-card {
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  margin-bottom: 16px;
+}
+.account-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+}
+
+/* 头部行 */
+.card-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 12px;
+}
+.account-profile {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  flex: 1;
+}
+.account-avatar {
+  flex-shrink: 0;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+.account-titles {
+  min-width: 0;
+  flex: 1;
+}
+.account-name-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.account-name {
+  font-size: 15px;
+  font-weight: 700;
+  color: #0f172a;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.account-group-line {
+  margin-top: 4px;
+}
+.group-tag {
+  display: inline-block;
+  background-color: #f1f5f9;
+  color: #475569;
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+.status-badge-wrap {
+  flex-shrink: 0;
+  margin-left: 8px;
+}
+
+/* UID 识别条 */
+.uid-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background-color: #f8fafc;
+  border: 1px solid #edf2f7;
+  border-radius: 6px;
+  padding: 6px 10px;
+  margin-bottom: 12px;
+}
+.uid-content {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+}
+.uid-prefix {
+  color: #94a3b8;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.uid-text {
+  color: #334155;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  user-select: all;
+}
+.copy-btn {
+  margin-left: 8px;
+  padding: 0 !important;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+/* 核心数据指标横幅 (粉丝/点赞/关注) */
+.stats-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 12px 6px;
+  margin-bottom: 12px;
+}
+.stat-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+.stat-divider {
+  width: 1px;
+  height: 28px;
+  background-color: #e2e8f0;
+}
+.stat-number {
+  font-size: 17px;
+  font-weight: 700;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  line-height: 1.2;
+}
+.stat-number.text-followers {
+  color: #0f172a;
+}
+.stat-number.text-likes {
+  color: #e11d48;
+}
+.stat-number.text-following {
+  color: #334155;
+}
+.stat-title {
+  font-size: 11px;
+  color: #64748b;
+  margin-top: 4px;
+  font-weight: 500;
+}
+
+/* 底部与元信息 */
+.account-meta {
+  font-size: 11px;
+  color: #94a3b8;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.text-loading {
+  color: #3b82f6;
+  font-weight: 500;
+}
+.card-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-top: 1px solid #f1f5f9;
+  padding-top: 12px;
+}
+.action-btns {
+  display: flex;
+  gap: 6px;
+}
+
+/* 通用与弹窗样式 */
 .mb-4 { margin-bottom: 16px; }
-.mb-3 { margin-bottom: 12px; }
-.mt-1 { margin-top: 4px; }
-.mt-2 { margin-top: 8px; }
-.mt-3 { margin-top: 12px; }
 .mr-1 { margin-right: 4px; }
-.pt-3 { padding-top: 12px; }
-.border-t { border-top: 1px solid #f1f5f9; }
 .flex { display: flex; }
-.flex-col { flex-direction: column; }
-.justify-between { justify-content: space-between; }
 .items-center { align-items: center; }
-.items-start { align-items: flex-start; }
-.gap-1 { gap: 4px; }
 .gap-2 { gap: 8px; }
-.gap-3 { gap: 12px; }
 .gap-4 { gap: 16px; }
-.font-bold { font-weight: 600; }
-.text-lg { font-size: 18px; }
-.text-base { font-size: 15px; }
-.text-sm { font-size: 14px; }
 .text-xs { font-size: 12px; }
-.text-gray-400 { color: #94a3b8; }
-.text-gray-500 { color: #64748b; }
-.text-gray-600 { color: #475569; }
-.text-center { text-align: center; }
 .qrcode-wrapper { min-height: 240px; }
 </style>
