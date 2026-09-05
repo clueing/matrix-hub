@@ -1,173 +1,217 @@
 <template>
-  <div class="live-browser-wrapper">
-    <!-- 右侧浮动召唤按钮 (类似 Manus 侧边挂件) -->
-    <div 
-      class="floating-preview-trigger"
-      :class="{ 'is-active': isLive }"
-      @click="visible = !visible"
-      title="点击展开/折叠受控浏览器实时视窗"
+  <div>
+    <!-- 右下角常驻悬浮控制按钮 (极简精致的浮动胶囊，告别花哨杂色) -->
+    <button
+      v-if="!visible"
+      type="button"
+      @click="visible = true"
+      class="fixed right-6 bottom-6 z-40 flex items-center gap-2 rounded-full border border-border bg-background/95 px-3.5 py-2 shadow-lg backdrop-blur-sm hover:bg-muted transition-all select-none group text-foreground cursor-pointer"
+      :class="{ 'border-emerald-500/50 ring-2 ring-emerald-500/20': isLive }"
+      title="点击展开受控浏览器实时视窗"
     >
-      <div class="trigger-indicator">
-        <span class="status-pulse" :class="{ 'is-live': isLive }"></span>
-      </div>
-      <div class="trigger-content">
-        <span class="trigger-icon">🤖</span>
-        <span class="trigger-text">实时浏览器</span>
-      </div>
-      <div v-if="isLive" class="live-pill">LIVE</div>
-    </div>
+      <span class="relative flex h-2 w-2">
+        <span v-if="isLive" class="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75"></span>
+        <span class="relative inline-flex h-2 w-2 rounded-full" :class="isLive ? 'bg-emerald-500' : 'bg-muted-foreground/40'"></span>
+      </span>
+      <Monitor class="h-4 w-4 text-foreground" />
+      <span class="text-xs font-medium text-foreground">实时视窗</span>
+      <Badge v-if="isLive" variant="success" class="text-[9px] px-1 py-0 h-4">
+        LIVE
+      </Badge>
+    </button>
 
-    <!-- 侧边推拉视窗抽屉 -->
-    <el-drawer
-      v-model="visible"
-      :size="drawerSize"
-      :with-header="false"
-      class="manus-preview-drawer"
-      direction="rtl"
-      :modal="false"
-      append-to-body
-    >
-      <div class="preview-container">
-        <!-- 顶部导航栏与状态 -->
-        <div class="preview-header">
-          <div class="flex items-center gap-2">
-            <span class="text-lg">🤖</span>
-            <div>
-              <div class="font-bold text-sm text-slate-100 flex items-center gap-2">
-                <span>实时受控视窗</span>
-                <el-tag v-if="isLive" size="small" type="success" effect="dark" class="live-tag">
-                  <span class="live-dot"></span> LIVE 画面
-                </el-tag>
-                <el-tag v-else size="small" type="info" effect="dark">
+    <!-- 侧边推拉视窗抽屉 (采用官方 shadcn Sheet 架构) -->
+    <Sheet v-model:open="visible">
+      <SheetContent
+        side="right"
+        :class="[
+          'p-0 flex flex-col gap-0 border-l border-border bg-background transition-all duration-300',
+          isExpanded ? 'w-full sm:max-w-4xl' : 'w-full sm:max-w-2xl'
+        ]"
+      >
+        <SheetTitle class="sr-only">受控浏览器实时视窗</SheetTitle>
+        <SheetDescription class="sr-only">实时监控底层自动化浏览器的执行画面与流水日志</SheetDescription>
+
+        <!-- 顶部导航栏 -->
+        <div class="h-14 px-4 border-b border-border flex items-center justify-between bg-card flex-shrink-0">
+          <div class="flex items-center gap-2.5 min-w-0 pr-2">
+            <Monitor class="h-4 w-4 text-muted-foreground flex-shrink-0" />
+            <div class="min-w-0">
+              <div class="flex items-center gap-2">
+                <span class="text-sm font-semibold text-foreground">受控浏览器视窗</span>
+                <Badge v-if="isLive" variant="success" class="text-[10px] px-1.5 py-0 gap-1 font-mono">
+                  <span class="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                  LIVE {{ fps > 0 ? `${fps} FPS` : '' }}
+                </Badge>
+                <Badge v-else-if="currentFrame" variant="secondary" class="text-[10px] px-1.5 py-0">
+                  已暂停
+                </Badge>
+                <Badge v-else variant="outline" class="text-[10px] px-1.5 py-0 text-muted-foreground">
                   待命中
-                </el-tag>
+                </Badge>
               </div>
-              <div class="text-[11px] text-slate-400 truncate max-w-[280px]">
-                {{ currentTitle || (isLive ? '正在执行自动化管线...' : '等待分发或登录任务启动') }}
-              </div>
+              <p class="text-[11px] text-muted-foreground truncate max-w-sm">
+                {{ currentTitle || (isLive ? '正在执行自动化交互管线...' : '等待发布任务、扫码登录或巡检启动') }}
+              </p>
             </div>
           </div>
 
-          <!-- 顶部快捷工具组 -->
-          <div class="flex items-center gap-1">
-            <el-tooltip content="保存当前画面快照" placement="bottom">
-              <el-button 
-                size="small" 
-                circle 
-                type="info" 
-                plain 
-                :disabled="!currentFrame" 
-                @click="downloadSnapshot"
-              >
-                <el-icon><Camera /></el-icon>
-              </el-button>
-            </el-tooltip>
-            <el-tooltip content="切换窗口尺寸" placement="bottom">
-              <el-button 
-                size="small" 
-                circle 
-                type="info" 
-                plain 
-                @click="toggleSize"
-              >
-                <el-icon><FullScreen /></el-icon>
-              </el-button>
-            </el-tooltip>
-            <el-tooltip content="收起视窗" placement="bottom">
-              <el-button 
-                size="small" 
-                circle 
-                type="info" 
-                plain 
-                @click="visible = false"
-              >
-                <el-icon><Close /></el-icon>
-              </el-button>
-            </el-tooltip>
+          <!-- 工具控制按钮 (留出 pr-8 避开 SheetContent 自带的 DialogClose) -->
+          <div class="flex items-center gap-1.5 pr-8">
+            <Button
+              variant="outline"
+              size="sm"
+              class="h-7 px-2 text-xs"
+              :disabled="!currentFrame"
+              @click="downloadSnapshot"
+              title="保存当前画面快照"
+            >
+              <Camera class="h-3.5 w-3.5 mr-1" />
+              <span>快照</span>
+            </Button>
+
+            <Button
+              variant="ghost"
+              size="sm"
+              class="h-7 w-7 p-0"
+              @click="isExpanded = !isExpanded"
+              :title="isExpanded ? '还原宽度' : '展开视窗'"
+            >
+              <component :is="isExpanded ? Minimize2 : Maximize2" class="h-3.5 w-3.5" />
+            </Button>
           </div>
         </div>
 
         <!-- 模拟浏览器地址栏 (Omnibox) -->
-        <div class="omnibox-bar">
-          <div class="omnibox-controls">
-            <span class="dot red"></span>
-            <span class="dot yellow"></span>
-            <span class="dot green"></span>
+        <div class="p-2.5 px-4 bg-muted/40 border-b border-border flex items-center gap-3 flex-shrink-0 text-xs">
+          <!-- 窗口三色圆点 (微精致修饰，克制不花哨) -->
+          <div class="flex items-center gap-1.5 flex-shrink-0">
+            <span class="h-2.5 w-2.5 rounded-full bg-border"></span>
+            <span class="h-2.5 w-2.5 rounded-full bg-border"></span>
+            <span class="h-2.5 w-2.5 rounded-full bg-border"></span>
           </div>
-          <div class="omnibox-input">
-            <el-icon class="mr-1 text-slate-400"><Lock /></el-icon>
-            <span class="url-text select-all truncate">{{ currentUrl || 'about:blank' }}</span>
+
+          <!-- URL 地址展示栏 -->
+          <div class="flex-1 min-w-0 flex items-center gap-1.5 bg-background border border-border rounded-md px-2.5 py-1 font-mono text-[11px] text-muted-foreground">
+            <Lock class="h-3 w-3 text-muted-foreground flex-shrink-0" />
+            <span class="truncate select-all text-foreground">{{ currentUrl || 'about:blank' }}</span>
           </div>
-          <div class="omnibox-fps text-[10px] text-slate-400">
-            {{ isLive ? `${fps} FPS` : 'OFFLINE' }}
-          </div>
+
+          <Button
+            v-if="currentUrl"
+            variant="ghost"
+            size="sm"
+            class="h-7 px-2 text-xs text-muted-foreground hover:text-foreground flex-shrink-0"
+            @click="copyUrl"
+            title="复制当前页面地址"
+          >
+            <Copy class="h-3.5 w-3.5 mr-1" />
+            <span>复制</span>
+          </Button>
         </div>
 
-        <!-- 核心画面渲染区 (Cinematic Viewport) -->
-        <div class="viewport-area">
-          <div v-if="currentFrame" class="frame-screen">
-            <img 
-              :src="'data:image/jpeg;base64,' + currentFrame" 
-              alt="Live Screen" 
-              class="screencast-img"
+        <!-- 画面呈现核心视口区 -->
+        <div class="flex-1 bg-zinc-950 relative flex items-center justify-center p-4 overflow-hidden min-h-[320px]">
+          <!-- 正在串流时的图像画面 -->
+          <div v-if="currentFrame" class="relative w-full h-full flex items-center justify-center">
+            <img
+              :src="'data:image/jpeg;base64,' + currentFrame"
+              alt="Live Screen"
+              class="max-w-full max-h-full object-contain rounded border border-zinc-800 shadow-md select-none"
             />
-            <div v-if="lastAction" class="action-hud-pill">
-              <span class="hud-dot"></span>
-              <span class="hud-text">{{ lastAction }}</span>
-            </div>
-          </div>
 
-          <!-- 空闲待命时的科技感骨架占位 -->
-          <div v-else class="idle-placeholder">
-            <div class="radar-box">
-              <div class="radar-wave"></div>
-              <el-icon :size="48" class="text-slate-600"><Monitor /></el-icon>
-            </div>
-            <div class="text-sm font-medium text-slate-300 mt-4">暂无活跃的受控浏览器视窗</div>
-            <div class="text-xs text-slate-500 mt-1 max-w-xs text-center leading-relaxed">
-              当发起矩阵视频发布、账号扫码登录或平台健康检测时，此处将以低时延流式呈现底层无头浏览器的真实操作过程。
-            </div>
-          </div>
-        </div>
-
-        <!-- 底部实时动作流水 -->
-        <div class="action-terminal">
-          <div class="terminal-header">
-            <span class="text-[11px] font-mono font-bold text-slate-400">SYNC LOG STREAM</span>
-            <span class="text-[10px] text-slate-500">{{ recentLogs.length }} 动作记录</span>
-          </div>
-          <div class="terminal-body" ref="terminalBodyRef">
-            <div v-if="recentLogs.length === 0" class="text-slate-600 text-xs py-3 text-center font-mono">
-              等待动作流水注入...
-            </div>
-            <div 
-              v-for="(log, idx) in recentLogs" 
-              :key="idx" 
-              class="terminal-line"
+            <!-- 底部浮动动作提示 HUD -->
+            <div
+              v-if="lastAction"
+              class="absolute bottom-3 left-1/2 -translate-x-1/2 bg-zinc-900/90 border border-zinc-700/80 rounded-full px-3.5 py-1 flex items-center gap-2 max-w-[90%] shadow-lg backdrop-blur-sm"
             >
-              <span class="line-time">{{ log.time }}</span>
-              <span class="line-tag" :class="getLogLevelClass(log.level)">[{{ log.level }}]</span>
-              <span class="line-msg">{{ log.message }}</span>
+              <span class="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-ping flex-shrink-0"></span>
+              <span class="text-[11px] text-zinc-200 font-medium truncate" :title="lastAction">
+                {{ lastAction }}
+              </span>
+            </div>
+          </div>
+
+          <!-- 空闲待命时的官方极简占位 (无任何伪科幻雷达花里胡哨) -->
+          <div v-else class="flex flex-col items-center justify-center text-center p-8 max-w-sm">
+            <div class="h-12 w-12 rounded-xl bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-500 mb-3">
+              <Globe class="h-6 w-6" />
+            </div>
+            <h3 class="text-sm font-semibold text-zinc-300">自动化视窗待命中</h3>
+            <p class="text-xs text-zinc-500 mt-1.5 leading-relaxed">
+              当发起矩阵视频发布、账号扫码授权或平台数据巡检时，此处将低时延实时串流展示底层 Chrome 的操作画面。
+            </p>
+          </div>
+        </div>
+
+        <!-- 底部动作流水控制台 -->
+        <div class="h-48 border-t border-border bg-zinc-950 flex flex-col flex-shrink-0">
+          <div class="p-2 px-4 bg-zinc-900/90 border-b border-zinc-800 flex items-center justify-between text-xs">
+            <span class="font-mono text-[11px] text-zinc-400">
+              ACTION STREAM ({{ logs.length }})
+            </span>
+            <div class="flex items-center gap-2">
+              <button
+                type="button"
+                :class="[
+                  'text-[10px] px-1.5 py-0.5 rounded transition-colors cursor-pointer',
+                  autoScroll ? 'bg-zinc-800 text-zinc-200' : 'text-zinc-500 hover:text-zinc-300'
+                ]"
+                @click="autoScroll = !autoScroll"
+              >
+                自动滚屏: {{ autoScroll ? '开' : '关' }}
+              </button>
+              <button
+                v-if="logs.length > 0"
+                type="button"
+                class="text-[10px] text-zinc-500 hover:text-zinc-300 cursor-pointer"
+                @click="logs = []"
+              >
+                清空
+              </button>
+            </div>
+          </div>
+
+          <div ref="terminalRef" class="flex-1 p-2.5 px-4 overflow-y-auto font-mono text-[11px] space-y-1 select-text leading-relaxed">
+            <div v-if="logs.length === 0" class="text-zinc-600 text-xs py-4 text-center">
+              等待底层动作流水注入...
+            </div>
+            <div
+              v-for="(log, idx) in logs"
+              :key="idx"
+              class="flex items-start gap-2 hover:bg-zinc-900/50 px-1 py-0.5 rounded"
+            >
+              <span class="text-zinc-500 flex-shrink-0">[{{ log.time }}]</span>
+              <span :class="['font-bold flex-shrink-0', getLogLevelClass(log.level)]">[{{ log.level }}]</span>
+              <span class="text-zinc-300 break-all">{{ log.message }}</span>
             </div>
           </div>
         </div>
-      </div>
-    </el-drawer>
+      </SheetContent>
+    </Sheet>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, nextTick } from "vue"
-import { Camera, FullScreen, Close, Lock, Monitor } from "@element-plus/icons-vue"
+import { ElMessage } from "element-plus"
+import {
+  Monitor, Maximize2, Minimize2, Camera, Lock, Copy, Globe
+} from "lucide-vue-next"
+
+import { Sheet, SheetContent, SheetTitle, SheetDescription } from "@/components/ui/sheet"
+import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
 
 const visible = ref(false)
-const drawerSize = ref("620px")
+const isExpanded = ref(false)
+const autoScroll = ref(true)
 
 const currentFrame = ref<string | null>(null)
 const currentTitle = ref<string>("")
 const currentUrl = ref<string>("")
 const lastAction = ref<string>("")
-const recentLogs = ref<any[]>([])
+const logs = ref<any[]>([])
 
 const frameCount = ref(0)
 const fps = ref(0)
@@ -178,26 +222,32 @@ const isLive = computed(() => {
   return Date.now() - lastFrameTime.value < 4000
 })
 
-const terminalBodyRef = ref<HTMLElement | null>(null)
-
-const toggleSize = () => {
-  drawerSize.value = drawerSize.value === "620px" ? "880px" : "620px"
-}
+const terminalRef = ref<HTMLElement | null>(null)
 
 const downloadSnapshot = () => {
   if (!currentFrame.value) return
   const link = document.createElement("a")
-  link.download = `matrix-browser-${Date.now()}.jpg`
+  link.download = `matrixhub-browser-${Date.now()}.jpg`
   link.href = "data:image/jpeg;base64," + currentFrame.value
   link.click()
+  ElMessage.success("画面快照已下载！")
+}
+
+const copyUrl = () => {
+  if (!currentUrl.value) return
+  navigator.clipboard.writeText(currentUrl.value).then(() => {
+    ElMessage.success("页面地址已复制！")
+  }).catch(() => {
+    ElMessage.warning("复制失败")
+  })
 }
 
 const getLogLevelClass = (level: string) => {
   switch (level) {
-    case "SUCCESS": return "text-emerald-400 font-bold"
-    case "ERROR": return "text-rose-400 font-bold"
-    case "WARNING": return "text-amber-400 font-bold"
-    default: return "text-sky-300"
+    case "SUCCESS": return "text-emerald-400"
+    case "ERROR": return "text-rose-400"
+    case "WARNING": return "text-amber-400"
+    default: return "text-sky-400"
   }
 }
 
@@ -218,23 +268,26 @@ const initWebSocket = () => {
         lastFrameTime.value = Date.now()
         frameCount.value++
       } else if (msg.event === "screencast_stopped") {
-        // 会话结束
         setTimeout(() => {
-          if (Date.now() - lastFrameTime.value >= 3000) {
+          if (Date.now() - lastFrameTime.value >= 4000) {
             currentFrame.value = null
             currentTitle.value = ""
             currentUrl.value = ""
           }
-        }, 3000)
+        }, 4000)
       } else if (msg.event === "log_append") {
         lastAction.value = msg.data.message
-        recentLogs.value.unshift(msg.data)
-        if (recentLogs.value.length > 50) recentLogs.value.pop()
-        nextTick(() => {
-          if (terminalBodyRef.value) {
-            terminalBodyRef.value.scrollTop = 0
-          }
-        })
+        // 正常时间正序追加 (最新消息在底部)
+        logs.value.push(msg.data)
+        if (logs.value.length > 200) logs.value.shift()
+
+        if (autoScroll.value) {
+          nextTick(() => {
+            if (terminalRef.value) {
+              terminalRef.value.scrollTop = terminalRef.value.scrollHeight
+            }
+          })
+        }
       }
     } catch (e) {}
   }
@@ -244,7 +297,12 @@ const initWebSocket = () => {
   }
 }
 
+const handleOpenLive = () => {
+  visible.value = true
+}
+
 onMounted(() => {
+  window.addEventListener("open-live-browser", handleOpenLive)
   initWebSocket()
   fpsTimer = setInterval(() => {
     fps.value = frameCount.value
@@ -253,337 +311,8 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  window.removeEventListener("open-live-browser", handleOpenLive)
   if (fpsTimer) clearInterval(fpsTimer)
   if (ws) ws.close()
 })
 </script>
-
-<style scoped>
-/* 悬浮唤出气泡 */
-.floating-preview-trigger {
-  position: fixed;
-  right: 0;
-  top: 50%;
-  transform: translateY(-50%);
-  z-index: 2100;
-  background: #0f172a;
-  border: 1px solid #334155;
-  border-right: none;
-  border-radius: 12px 0 0 12px;
-  padding: 10px 8px;
-  cursor: pointer;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  box-shadow: -4px 0 16px rgba(0, 0, 0, 0.25);
-  transition: all 0.25s ease;
-  user-select: none;
-}
-
-.floating-preview-trigger:hover {
-  background: #1e293b;
-  padding-left: 12px;
-  border-color: #38bdf8;
-}
-
-.floating-preview-trigger.is-active {
-  border-color: #10b981;
-  box-shadow: -4px 0 20px rgba(16, 185, 129, 0.35);
-}
-
-.trigger-indicator {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.status-pulse {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #64748b;
-  transition: all 0.3s ease;
-}
-
-.status-pulse.is-live {
-  background: #10b981;
-  box-shadow: 0 0 8px #10b981;
-  animation: pulse-ring 1.8s infinite;
-}
-
-@keyframes pulse-ring {
-  0% { transform: scale(0.9); opacity: 1; }
-  50% { transform: scale(1.3); opacity: 0.7; }
-  100% { transform: scale(0.9); opacity: 1; }
-}
-
-.trigger-content {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-}
-
-.trigger-icon {
-  font-size: 16px;
-}
-
-.trigger-text {
-  writing-mode: vertical-rl;
-  font-size: 11px;
-  letter-spacing: 2px;
-  color: #94a3b8;
-  font-weight: 500;
-}
-
-.floating-preview-trigger:hover .trigger-text,
-.floating-preview-trigger.is-active .trigger-text {
-  color: #f8fafc;
-}
-
-.live-pill {
-  background: #10b981;
-  color: #ffffff;
-  font-size: 9px;
-  font-weight: bold;
-  padding: 1px 4px;
-  border-radius: 4px;
-  letter-spacing: 0.5px;
-}
-
-/* 抽屉内部结构 */
-.preview-container {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  background: #090d16;
-  color: #f1f5f9;
-}
-
-.preview-header {
-  padding: 14px 18px;
-  background: #0f172a;
-  border-bottom: 1px solid #1e293b;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.live-tag {
-  background-color: #064e3b !important;
-  border-color: #059669 !important;
-  color: #34d399 !important;
-}
-
-.live-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #34d399;
-  display: inline-block;
-  margin-right: 4px;
-  animation: blink 1s infinite alternate;
-}
-
-@keyframes blink {
-  from { opacity: 0.4; }
-  to { opacity: 1; }
-}
-
-/* Omnibox */
-.omnibox-bar {
-  padding: 8px 16px;
-  background: #131c31;
-  border-bottom: 1px solid #1e293b;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.omnibox-controls {
-  display: flex;
-  gap: 5px;
-}
-
-.omnibox-controls .dot {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-}
-
-.dot.red { background: #ef4444; }
-.dot.yellow { background: #eab308; }
-.dot.green { background: #22c55e; }
-
-.omnibox-input {
-  flex: 1;
-  background: #090d16;
-  border: 1px solid #223049;
-  border-radius: 6px;
-  padding: 4px 10px;
-  display: flex;
-  align-items: center;
-  font-size: 11px;
-  color: #94a3b8;
-  font-family: monospace;
-}
-
-.url-text {
-  color: #e2e8f0;
-}
-
-/* 核心视口 */
-.viewport-area {
-  flex: 1;
-  background: #030712;
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-  padding: 12px;
-}
-
-.frame-screen {
-  position: relative;
-  width: 100%;
-  height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.screencast-img {
-  max-width: 100%;
-  max-height: 100%;
-  object-fit: contain;
-  border-radius: 8px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7);
-  border: 1px solid #1e293b;
-}
-
-.action-hud-pill {
-  position: absolute;
-  bottom: 14px;
-  left: 50%;
-  transform: translateX(-50%);
-  background: rgba(15, 23, 42, 0.88);
-  backdrop-filter: blur(8px);
-  border: 1px solid #334155;
-  border-radius: 20px;
-  padding: 6px 14px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
-  max-width: 85%;
-}
-
-.hud-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: #38bdf8;
-  box-shadow: 0 0 6px #38bdf8;
-  flex-shrink: 0;
-}
-
-.hud-text {
-  font-size: 11px;
-  color: #f1f5f9;
-  font-weight: 500;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* 空闲待命状态 */
-.idle-placeholder {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 40px 20px;
-}
-
-.radar-box {
-  position: relative;
-  width: 80px;
-  height: 80px;
-  border-radius: 50%;
-  background: #0f172a;
-  border: 1px solid #1e293b;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.radar-wave {
-  position: absolute;
-  inset: -8px;
-  border-radius: 50%;
-  border: 1px solid rgba(56, 189, 248, 0.2);
-  animation: radar-expand 2.5s infinite;
-}
-
-@keyframes radar-expand {
-  0% { transform: scale(0.9); opacity: 0.8; }
-  100% { transform: scale(1.6); opacity: 0; }
-}
-
-/* 同步日志控制台 */
-.action-terminal {
-  height: 180px;
-  background: #0b1120;
-  border-top: 1px solid #1e293b;
-  display: flex;
-  flex-direction: column;
-}
-
-.terminal-header {
-  padding: 8px 16px;
-  background: #0f172a;
-  border-bottom: 1px solid #1e293b;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.terminal-body {
-  flex: 1;
-  padding: 8px 16px;
-  overflow-y: auto;
-  font-family: monospace;
-  font-size: 11px;
-  line-height: 1.6;
-}
-
-.terminal-line {
-  margin-bottom: 2px;
-  display: flex;
-  gap: 6px;
-  align-items: flex-start;
-  word-break: break-all;
-}
-
-.line-time {
-  color: #64748b;
-  flex-shrink: 0;
-}
-
-.line-tag {
-  flex-shrink: 0;
-}
-
-.line-msg {
-  color: #cbd5e1;
-}
-</style>
-<style>
-/* 抽屉无 padding 样式适配 */
-.manus-preview-drawer .el-drawer__body {
-  padding: 0 !important;
-  overflow: hidden !important;
-}
-</style>
