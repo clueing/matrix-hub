@@ -12,6 +12,16 @@
           </el-radio-group>
         </div>
         <div class="flex gap-2">
+          <el-popconfirm 
+            title="确定要清理所有失败的任务与失败子作品吗？" 
+            @confirm="handleClearFailedTasks"
+          >
+            <template #reference>
+              <el-button type="danger" plain :disabled="!hasFailedTasks">
+                <el-icon class="mr-1"><Delete /></el-icon> 清理失败任务
+              </el-button>
+            </template>
+          </el-popconfirm>
           <el-button @click="loadTasks">
             <el-icon class="mr-1"><Refresh /></el-icon> 刷新
           </el-button>
@@ -69,8 +79,8 @@
                     <span v-else class="text-gray-400">-</span>
                   </template>
                 </el-table-column>
-                <!-- 子任务操作栏：发布成功前允许取消与编辑 -->
-                <el-table-column label="操作" width="160" align="center">
+                <!-- 子任务操作栏：发布成功前允许取消与编辑，失败或已取消时支持删除 -->
+                <el-table-column label="操作" width="190" align="center">
                   <template #default="{ row: sub }">
                     <div class="flex items-center justify-center gap-1">
                       <el-button 
@@ -100,6 +110,15 @@
                       >
                         重试
                       </el-button>
+                      <el-popconfirm 
+                        v-if="sub.status === 'failed' || sub.status === 'cancelled'" 
+                        title="确定要删除该子作品记录吗？" 
+                        @confirm="handleDeleteSubtask(sub.id)"
+                      >
+                        <template #reference>
+                          <el-button size="small" type="danger" link>删除</el-button>
+                        </template>
+                      </el-popconfirm>
                       <span v-if="sub.status === 'published'" class="text-xs text-green-600 font-medium">已完成</span>
                     </div>
                   </template>
@@ -236,12 +255,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from "vue"
+import { ref, computed, onMounted, onUnmounted } from "vue"
 import { ElMessage } from "element-plus"
-import { Refresh, Document } from "@element-plus/icons-vue"
+import { Refresh, Document, Delete } from "@element-plus/icons-vue"
 import { 
   getTasks, getTaskDetails, retryTask, cancelTask, 
-  deleteTask, cancelSubtask, updateSubtask, retrySubtask 
+  deleteTask, cancelSubtask, updateSubtask, retrySubtask,
+  deleteSubtask, clearFailedTasks
 } from "../api"
 
 const loading = ref(false)
@@ -249,6 +269,10 @@ const tasks = ref<any[]>([])
 const statusFilter = ref("")
 const showLogDrawer = ref(false)
 const logs = ref<any[]>([])
+
+const hasFailedTasks = computed(() => {
+  return tasks.value.some(t => t.fail_count > 0 || t.status === 'failed' || t.status === 'partial_failed')
+})
 
 // 编辑子任务模态框状态
 const editDialogVisible = ref(false)
@@ -346,6 +370,26 @@ const handleCancelSubtask = async (subtaskId: string) => {
 const handleRetrySubtask = async (subtaskId: string) => {
   try {
     const res: any = await retrySubtask(subtaskId)
+    ElMessage.success(res.message)
+    loadTasks()
+  } catch (e: any) {
+    ElMessage.error(e.message)
+  }
+}
+
+const handleDeleteSubtask = async (subtaskId: string) => {
+  try {
+    const res: any = await deleteSubtask(subtaskId)
+    ElMessage.success(res.message)
+    loadTasks()
+  } catch (e: any) {
+    ElMessage.error(e.message)
+  }
+}
+
+const handleClearFailedTasks = async () => {
+  try {
+    const res: any = await clearFailedTasks()
     ElMessage.success(res.message)
     loadTasks()
   } catch (e: any) {

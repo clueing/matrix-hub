@@ -63,6 +63,12 @@ export const deleteTask = (taskId: string) =>
 export const cancelSubtask = (subtaskId: string) =>
   apiClient.post(`/tasks/subtasks/${subtaskId}/cancel`)
 
+export const deleteSubtask = (subtaskId: string) =>
+  apiClient.delete(`/tasks/subtasks/${subtaskId}`)
+
+export const clearFailedTasks = () =>
+  apiClient.delete("/tasks/failed/clear")
+
 export const updateSubtask = (subtaskId: string, data: any) =>
   apiClient.patch(`/tasks/subtasks/${subtaskId}`, data)
 

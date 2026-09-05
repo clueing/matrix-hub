@@ -166,9 +166,58 @@ async def cancel_task(task_id: str, db: AsyncSession = Depends(get_db)):
             s.error_message = "用户手动取消发布"
             cancelled_count += 1
 
-    task.status = "cancelled"
+@router.delete("/failed/clear", summary="一键清理所有失败的任务与失败子作品")
+async def clear_failed_tasks(db: AsyncSession = Depends(get_db)):
+    """一键清理：彻底删除全部失败的主任务，并清理部分失败任务中的失败子任务"""
+    tasks_res = await db.execute(select(PublishTask))
+    all_tasks = tasks_res.scalars().all()
+
+    cleared_tasks_count = 0
+    cleared_subtasks_count = 0
+
+    for task in all_tasks:
+        subs_res = await db.execute(select(PublishSubtask).where(PublishSubtask.task_id == task.id))
+        subs = subs_res.scalars().all()
+        
+        # 若主任务整体失败或所有子任务均已失败/取消
+        if task.status == "failed" or (subs and all(s.status in ["failed", "cancelled"] for s in subs)):
+            for s in subs:
+                scheduler_service.cancel_subtask_job(s.id)
+            await db.delete(task)
+            cleared_tasks_count += 1
+            cleared_subtasks_count += len(subs)
+        elif any(s.status == "failed" for s in subs):
+            # 部分失败任务：清理其失败的子作品并重算统计
+            for s in subs:
+                if s.status == "failed":
+                    scheduler_service.cancel_subtask_job(s.id)
+                    await db.delete(s)
+                    cleared_subtasks_count += 1
+            await db.flush()
+            
+            rem_subs_res = await db.execute(select(PublishSubtask).where(PublishSubtask.task_id == task.id))
+            rem_subs = rem_subs_res.scalars().all()
+            if not rem_subs:
+                await db.delete(task)
+                cleared_tasks_count += 1
+            else:
+                task.total_count = len(rem_subs)
+                task.success_count = sum(1 for s in rem_subs if s.status == "published")
+                task.fail_count = sum(1 for s in rem_subs if s.status == "failed")
+                if all(s.status == "published" for s in rem_subs):
+                    task.status = "completed"
+                elif all(s.status == "cancelled" for s in rem_subs):
+                    task.status = "cancelled"
+                elif any(s.status in ["pending", "uploading", "scheduled", "waiting_manual"] for s in rem_subs):
+                    task.status = "processing"
+                else:
+                    task.status = "partial_failed"
+
     await db.commit()
-    return {"code": 0, "message": f"已成功取消 {cancelled_count} 个未发布的子任务"}
+    return {
+        "code": 0, 
+        "message": f"已清理 {cleared_tasks_count} 个失败任务，共移除 {cleared_subtasks_count} 个失败子作品"
+    }
 
 @router.delete("/{task_id}", summary="删除发布任务记录")
 async def delete_task(task_id: str, db: AsyncSession = Depends(get_db)):
@@ -274,3 +323,44 @@ async def retry_single_subtask(subtask_id: str, db: AsyncSession = Depends(get_d
 
     await scheduler_service.schedule_single_subtask(subtask.id, schedule_mode="immediate")
     return {"code": 0, "message": "子任务已重新加入执行队列"}
+
+@router.delete("/subtasks/{subtask_id}", summary="单独删除指定的子任务")
+async def delete_single_subtask(subtask_id: str, db: AsyncSession = Depends(get_db)):
+    """从任务中删除指定的子作品，并自动同步更新主任务进度与状态统计"""
+    res = await db.execute(select(PublishSubtask).where(PublishSubtask.id == subtask_id))
+    subtask = res.scalar_one_or_none()
+    if not subtask:
+        raise HTTPException(status_code=404, detail="子任务不存在")
+
+    scheduler_service.cancel_subtask_job(subtask.id)
+    task_id = subtask.task_id
+    await db.delete(subtask)
+    await db.flush()
+
+    task_res = await db.execute(select(PublishTask).where(PublishTask.id == task_id))
+    task = task_res.scalar_one_or_none()
+    if task:
+        subs_res = await db.execute(select(PublishSubtask).where(PublishSubtask.task_id == task_id))
+        all_subs = subs_res.scalars().all()
+        if not all_subs:
+            await db.delete(task)
+        else:
+            task.total_count = len(all_subs)
+            task.success_count = sum(1 for s in all_subs if s.status == "published")
+            task.fail_count = sum(1 for s in all_subs if s.status == "failed")
+            if any(s.status in ["pending", "uploading", "scheduled", "waiting_manual"] for s in all_subs):
+                task.status = "processing"
+            elif all(s.status == "published" for s in all_subs):
+                task.status = "completed"
+            elif all(s.status == "cancelled" for s in all_subs):
+                task.status = "cancelled"
+            elif all(s.status == "failed" for s in all_subs):
+                task.status = "failed"
+            elif any(s.status == "published" for s in all_subs):
+                task.status = "partial_failed" if any(s.status in ["failed", "cancelled"] for s in all_subs) else "completed"
+            else:
+                task.status = "failed"
+
+    await db.commit()
+    return {"code": 0, "message": "子任务已成功删除"}
+
