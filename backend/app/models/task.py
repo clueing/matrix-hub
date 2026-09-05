@@ -99,3 +99,27 @@ class PublishSubtask(Base):
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
+
+
+class TaskLog(Base):
+    __tablename__ = "task_logs"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    task_id = Column(String(36), ForeignKey("publish_tasks.id", ondelete="CASCADE"), nullable=True, index=True)
+    subtask_id = Column(String(36), ForeignKey("publish_subtasks.id", ondelete="CASCADE"), nullable=True, index=True)
+    account_id = Column(String(36), nullable=True, index=True)
+    level = Column(String(16), default="INFO")
+    message = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "task_id": self.task_id,
+            "subtask_id": self.subtask_id,
+            "account_id": self.account_id,
+            "level": self.level,
+            "message": self.message,
+            "time": self.created_at.strftime("%H:%M:%S") if self.created_at else "",
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }

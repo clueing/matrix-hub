@@ -61,11 +61,15 @@
         <router-view />
       </el-main>
     </el-container>
+
+    <!-- 全局 Manus 风格实时受控浏览器视窗 -->
+    <LiveBrowserPreview />
   </el-container>
 </template>
 
 <script setup lang="ts">
 import { Odometer, User, Promotion, Tickets, Setting } from "@element-plus/icons-vue"
+import LiveBrowserPreview from "./components/LiveBrowserPreview.vue"
 </script>
 
 <style>

@@ -25,7 +25,7 @@
           <el-button @click="loadTasks">
             <el-icon class="mr-1"><Refresh /></el-icon> 刷新
           </el-button>
-          <el-button type="info" @click="showLogDrawer = true">
+          <el-button type="info" @click="openGlobalLogDrawer">
             <el-icon class="mr-1"><Document /></el-icon> 实时运行日志
           </el-button>
         </div>
@@ -80,9 +80,12 @@
                   </template>
                 </el-table-column>
                 <!-- 子任务操作栏：发布成功前允许取消与编辑，失败或已取消时支持删除 -->
-                <el-table-column label="操作" width="190" align="center">
+                <el-table-column label="操作" width="230" align="center">
                   <template #default="{ row: sub }">
                     <div class="flex items-center justify-center gap-1">
+                      <el-button size="small" type="info" link @click="openTaskLogDrawer(row, sub)">
+                        日志
+                      </el-button>
                       <el-button 
                         v-if="sub.status !== 'published'" 
                         size="small" 
@@ -170,9 +173,12 @@
             {{ row.created_at ? row.created_at.slice(0, 19).replace('T', ' ') : '-' }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="180" align="center">
+        <el-table-column label="操作" width="220" align="center">
           <template #default="{ row }">
             <div class="flex items-center justify-center gap-1">
+              <el-button size="small" type="primary" link @click="openTaskLogDrawer(row)">
+                日志
+              </el-button>
               <el-button v-if="row.fail_count > 0" size="small" type="warning" link @click="handleRetry(row.id)">
                 重试失败
               </el-button>
@@ -240,11 +246,74 @@
       </template>
     </el-dialog>
 
-    <!-- 实时运行日志抽屉 -->
-    <el-drawer v-model="showLogDrawer" title="实时执行日志" size="45%">
+    <!-- 任务执行与持久化日志抽屉 -->
+    <el-drawer 
+      v-model="showLogDrawer" 
+      size="50%"
+      destroy-on-close
+    >
+      <template #header>
+        <div class="flex items-center justify-between w-full pr-4">
+          <div class="flex items-center gap-2">
+            <el-icon :size="18"><Document /></el-icon>
+            <span class="font-bold text-base text-slate-800">{{ drawerTitle }}</span>
+            <el-tag v-if="selectedTask" size="small" type="success" effect="light">
+              SQLite 数据库持久化
+            </el-tag>
+          </div>
+          <div class="flex items-center gap-2">
+            <el-select 
+              v-model="logLevelFilter" 
+              size="small" 
+              placeholder="日志等级" 
+              style="width: 105px;"
+            >
+              <el-option label="全部等级" value="" />
+              <el-option label="SUCCESS" value="SUCCESS" />
+              <el-option label="ERROR" value="ERROR" />
+              <el-option label="WARNING" value="WARNING" />
+              <el-option label="INFO" value="INFO" />
+            </el-select>
+            <el-button size="small" @click="handleRefreshLogs" :loading="loadingTaskLogs">
+              <el-icon><Refresh /></el-icon>
+            </el-button>
+            <el-button size="small" @click="copyAllLogs">
+              复制日志
+            </el-button>
+          </div>
+        </div>
+      </template>
+
+      <!-- 子任务快速切换栏（仅当选择主任务且有子任务时） -->
+      <div v-if="selectedTask && selectedTask.subtasks && selectedTask.subtasks.length > 1" class="mb-3 flex items-center gap-2 flex-wrap bg-slate-100 p-2 rounded">
+        <span class="text-xs text-slate-500">过滤子账号:</span>
+        <el-tag 
+          size="small" 
+          :effect="!selectedSubtask ? 'dark' : 'plain'"
+          class="cursor-pointer"
+          @click="selectSubtaskFilter(null)"
+        >
+          全部账号 ({{ selectedTask.subtasks.length }})
+        </el-tag>
+        <el-tag 
+          v-for="sub in selectedTask.subtasks" 
+          :key="sub.id"
+          size="small"
+          :effect="selectedSubtask?.id === sub.id ? 'dark' : 'plain'"
+          :type="sub.platform === 'xiaohongshu' ? 'danger' : 'primary'"
+          class="cursor-pointer"
+          @click="selectSubtaskFilter(sub)"
+        >
+          {{ sub.account_name }}
+        </el-tag>
+      </div>
+
       <div class="log-terminal bg-slate-900 text-slate-100 p-4 rounded font-mono text-xs overflow-y-auto">
-        <div v-if="logs.length === 0" class="text-slate-500 py-8 text-center">暂无实时日志事件</div>
-        <div v-for="(log, idx) in logs" :key="idx" class="log-line mb-1">
+        <div v-if="displayedLogs.length === 0" class="text-slate-500 py-12 text-center">
+          <el-icon :size="24" class="mb-2"><Document /></el-icon>
+          <div>{{ loadingTaskLogs ? '正在读取数据库历史持久化日志...' : '暂无符合条件的日志记录' }}</div>
+        </div>
+        <div v-for="(log, idx) in displayedLogs" :key="idx" class="log-line mb-1">
           <span class="text-slate-400 mr-2">[{{ log.time }}]</span>
           <span :class="getLogLevelClass(log.level)">[{{ log.level }}]</span>
           <span class="ml-2">{{ log.message }}</span>
@@ -261,7 +330,7 @@ import { Refresh, Document, Delete } from "@element-plus/icons-vue"
 import { 
   getTasks, getTaskDetails, retryTask, cancelTask, 
   deleteTask, cancelSubtask, updateSubtask, retrySubtask,
-  deleteSubtask, clearFailedTasks
+  deleteSubtask, clearFailedTasks, getTaskLogs
 } from "../api"
 
 const loading = ref(false)
@@ -269,6 +338,80 @@ const tasks = ref<any[]>([])
 const statusFilter = ref("")
 const showLogDrawer = ref(false)
 const logs = ref<any[]>([])
+
+// 独立任务日志状态
+const selectedTask = ref<any>(null)
+const selectedSubtask = ref<any>(null)
+const taskLogs = ref<any[]>([])
+const loadingTaskLogs = ref(false)
+const logLevelFilter = ref("")
+
+const drawerTitle = computed(() => {
+  if (selectedTask.value) {
+    let title = `任务日志: ${selectedTask.value.name}`
+    if (selectedSubtask.value) {
+      title += ` - ${selectedSubtask.value.account_name}`
+    }
+    return title
+  }
+  return "系统实时运行日志"
+})
+
+const displayedLogs = computed(() => {
+  const source = selectedTask.value ? taskLogs.value : logs.value
+  if (!logLevelFilter.value) return source
+  return source.filter((l: any) => l.level === logLevelFilter.value)
+})
+
+const openTaskLogDrawer = (task: any, subtask?: any) => {
+  selectedTask.value = task
+  selectedSubtask.value = subtask || null
+  showLogDrawer.value = true
+  loadTaskLogs()
+}
+
+const openGlobalLogDrawer = () => {
+  selectedTask.value = null
+  selectedSubtask.value = null
+  showLogDrawer.value = true
+}
+
+const selectSubtaskFilter = (sub: any) => {
+  selectedSubtask.value = sub
+  loadTaskLogs()
+}
+
+const loadTaskLogs = async () => {
+  if (!selectedTask.value) return
+  loadingTaskLogs.value = true
+  try {
+    const res: any = await getTaskLogs(selectedTask.value.id, selectedSubtask.value?.id)
+    taskLogs.value = res.data || []
+  } catch (e: any) {
+    ElMessage.error(e.message)
+  } finally {
+    loadingTaskLogs.value = false
+  }
+}
+
+const handleRefreshLogs = () => {
+  if (selectedTask.value) {
+    loadTaskLogs()
+  }
+}
+
+const copyAllLogs = () => {
+  const text = displayedLogs.value.map((l: any) => `[${l.time}] [${l.level}] ${l.message}`).join("\n")
+  if (!text) {
+    ElMessage.info("暂无日志可复制")
+    return
+  }
+  navigator.clipboard.writeText(text).then(() => {
+    ElMessage.success("日志已复制到剪贴板！")
+  }).catch(() => {
+    ElMessage.warning("复制失败，请手动选择复制")
+  })
+}
 
 const hasFailedTasks = computed(() => {
   return tasks.value.some(t => t.fail_count > 0 || t.status === 'failed' || t.status === 'partial_failed')
@@ -299,6 +442,13 @@ const initWebSocket = () => {
       if (msg.event === "log_append") {
         logs.value.unshift(msg.data)
         if (logs.value.length > 300) logs.value.pop()
+
+        // 若当前打开了专属任务日志抽屉且 ID 匹配，追加到 taskLogs
+        if (selectedTask.value && msg.data.task_id === selectedTask.value.id) {
+          if (!selectedSubtask.value || msg.data.subtask_id === selectedSubtask.value.id) {
+            taskLogs.value.push(msg.data)
+          }
+        }
       } else if (msg.event === "subtask_status_changed" || msg.event === "task_status_changed") {
         loadTasks()
       }

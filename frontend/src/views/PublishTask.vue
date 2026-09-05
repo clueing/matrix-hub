@@ -285,9 +285,9 @@
 
         <el-form-item label="发布方式" required>
           <el-radio-group v-model="form.schedule_mode">
-            <el-radio label="immediate">立即错峰排队发布</el-radio>
+            <el-radio label="immediate">立即发布 (即刻启动流程)</el-radio>
             <el-radio label="platform_native">平台官方原生定时 (关机也能按时公开)</el-radio>
-            <el-radio label="local_staggered">本地阶梯定时 (电脑到点唤醒)</el-radio>
+            <el-radio label="local_staggered">本地预约定时 (到点准时唤醒执行)</el-radio>
           </el-radio-group>
         </el-form-item>
 
@@ -301,13 +301,26 @@
           />
         </el-form-item>
 
-        <el-form-item label="账号错峰间隔">
-          <div class="flex items-center gap-4">
-            <span>基础间隔: </span>
-            <el-input-number v-model="form.stagger_interval" :min="30" :max="1800" :step="60" /> 秒
-            <span class="ml-4">随机扰动: ±</span>
-            <el-input-number v-model="form.stagger_jitter" :min="0" :max="300" :step="10" /> 秒
-            <span class="text-xs text-gray-400 ml-2">在同一局域网下依次延迟上传，防止触发平台瞬时并发风控</span>
+        <el-form-item label="错峰防风控">
+          <div class="flex flex-col gap-2">
+            <div class="flex items-center gap-4">
+              <el-switch 
+                v-model="enableStagger" 
+                active-text="启用账号阶梯错峰延迟 (适合多账号大批量分发防关联)" 
+                inactive-text="关闭错峰 (零等待即刻/准点并发分发)" 
+              />
+            </div>
+            <div v-if="enableStagger" class="flex items-center gap-3 p-3 bg-slate-50 border border-slate-200 rounded-lg">
+              <span>账号基础间隔: </span>
+              <el-input-number v-model="form.stagger_interval" :min="10" :max="1800" :step="30" size="small" /> 秒
+              <span class="ml-3">随机扰动: ±</span>
+              <el-input-number v-model="form.stagger_jitter" :min="0" :max="120" :step="5" size="small" /> 秒
+              <span class="text-xs text-gray-400 ml-2">多账号依次递增执行，降低同一局域网并发风控风险</span>
+            </div>
+            <div v-else class="text-xs text-emerald-600 flex items-center gap-1 font-medium">
+              <el-icon><CircleCheck /></el-icon>
+              已开启极速准点模式：任务创建后子账号立即启动发布，零额外等待。
+            </div>
           </div>
         </el-form-item>
       </el-form>
@@ -420,6 +433,7 @@ const selectedAccountIds = ref<string[]>([])
 const subtaskItems = ref<any[]>([])
 
 const submitting = ref(false)
+const enableStagger = ref(false)
 
 const form = ref({
   name: "",
@@ -428,8 +442,8 @@ const form = ref({
   master_tags: [] as string[],
   schedule_mode: "immediate",
   scheduled_at: null as string | null,
-  stagger_interval: 300,
-  stagger_jitter: 60
+  stagger_interval: 60,
+  stagger_jitter: 10
 })
 
 const loadAccounts = async () => {
@@ -623,8 +637,8 @@ const handleSubmit = async () => {
       master_tags: form.value.master_tags,
       schedule_mode: form.value.schedule_mode,
       scheduled_at: form.value.scheduled_at,
-      stagger_interval: form.value.stagger_interval,
-      stagger_jitter: form.value.stagger_jitter,
+      stagger_interval: enableStagger.value ? form.value.stagger_interval : 0,
+      stagger_jitter: enableStagger.value ? form.value.stagger_jitter : 0,
       items: subtaskItems.value.map(it => ({
         account_id: it.account_id,
         video_path: it.video_path,

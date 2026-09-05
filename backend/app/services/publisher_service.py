@@ -65,8 +65,21 @@ class PublisherService:
                     proxy_url=account.proxy_url
                 )
 
+                # 挂载 CDP Screencast 实时屏幕推流 (Manus 风格视窗)
+                await playwright_driver.start_screencast(
+                    page,
+                    task_id=subtask.task_id,
+                    account_id=account.id
+                )
+
                 def log_callback(level: str, msg: str):
-                    asyncio.create_task(event_bus.emit_log(msg, level=level, task_id=subtask.task_id, account_id=account.id))
+                    asyncio.create_task(event_bus.emit_log(
+                        msg,
+                        level=level,
+                        task_id=subtask.task_id,
+                        subtask_id=subtask.id,
+                        account_id=account.id
+                    ))
 
                 subtask_dict = {
                     "video_path": subtask.video_path,
@@ -93,6 +106,7 @@ class PublisherService:
                         f"【{account.account_name}】作品《{subtask.title}》发布成功！",
                         level="SUCCESS",
                         task_id=subtask.task_id,
+                        subtask_id=subtask.id,
                         account_id=account.id
                     )
                 else:
@@ -106,6 +120,7 @@ class PublisherService:
                         f"【{account.account_name}】作品《{subtask.title}》发布失败: {err}",
                         level="ERROR",
                         task_id=subtask.task_id,
+                        subtask_id=subtask.id,
                         account_id=account.id
                     )
 
@@ -120,11 +135,18 @@ class PublisherService:
                     f"【{account.account_name}】执行发布异常中断: {err_msg}",
                     level="ERROR",
                     task_id=subtask.task_id,
+                    subtask_id=subtask.id,
                     account_id=account.id
                 )
             finally:
+                if page:
+                    await playwright_driver.stop_screencast(page)
                 if context:
                     await playwright_driver.close_context(context, page)
+                await event_bus.broadcast("screencast_stopped", {
+                    "task_id": subtask.task_id,
+                    "account_id": account.id
+                })
                 await event_bus.broadcast("subtask_status_changed", subtask.to_dict())
 
     async def _update_parent_task_stats(self, db: AsyncSession, task_id: str):

@@ -75,6 +75,9 @@ export const updateSubtask = (subtaskId: string, data: any) =>
 export const retrySubtask = (subtaskId: string) =>
   apiClient.post(`/tasks/subtasks/${subtaskId}/retry`)
 
+export const getTaskLogs = (taskId: string, subtaskId?: string) =>
+  apiClient.get(`/tasks/${taskId}/logs`, { params: { subtask_id: subtaskId } })
+
 // ==================== 视频文件接口 ====================
 export const scanFolder = (folderPath: string) =>
   apiClient.post("/videos/scan-folder", { folder_path: folderPath })

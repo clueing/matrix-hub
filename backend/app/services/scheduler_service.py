@@ -39,17 +39,21 @@ class SchedulerService:
 
         for idx, item in enumerate(subtasks_data):
             subtask_id = item["id"]
+            task_id = item.get("task_id")
             mode = item.get("schedule_mode", "immediate")
             target_time = item.get("scheduled_at")
 
-            # 阶梯累加错峰时间
-            delay_seconds = idx * base_interval_seconds
-            if jitter_seconds > 0:
-                delay_seconds += random.randint(-jitter_seconds, jitter_seconds)
-            delay_seconds = max(0, delay_seconds)
+            # 阶梯累加错峰时间：若基础间隔为0，则全部零延迟即时触发
+            if base_interval_seconds == 0:
+                delay_seconds = 0
+            else:
+                delay_seconds = idx * base_interval_seconds
+                if jitter_seconds > 0:
+                    delay_seconds += random.randint(-jitter_seconds, jitter_seconds)
+                delay_seconds = max(0, delay_seconds)
 
             if mode == "immediate":
-                # 立即排队依次错峰执行
+                # 立即执行或依次错峰执行
                 run_time = now + timedelta(seconds=delay_seconds)
                 self.scheduler.add_job(
                     publisher_service.execute_subtask,
@@ -59,9 +63,11 @@ class SchedulerService:
                     id=f"subtask_{subtask_id}",
                     replace_existing=True
                 )
-                await event_bus.emit_log(
-                    f"子任务已加入错峰执行队列，预计执行时间: {run_time.strftime('%H:%M:%S')}"
-                )
+                if delay_seconds == 0:
+                    msg = "子任务已加入即时执行队列，立即启动发布流程"
+                else:
+                    msg = f"子任务已加入错峰执行队列，预计执行时间: {run_time.strftime('%H:%M:%S')}"
+                await event_bus.emit_log(msg, task_id=task_id, subtask_id=subtask_id)
 
             elif mode == "platform_native":
                 # 平台原生定时：任务直接在当前依次排队上传，向平台提交指定的定时时刻
@@ -74,9 +80,11 @@ class SchedulerService:
                     id=f"subtask_{subtask_id}",
                     replace_existing=True
                 )
-                await event_bus.emit_log(
-                    f"子任务将在本地错峰提交 ({run_time.strftime('%H:%M:%S')})，并设定平台于 {target_time} 正式公开"
-                )
+                if delay_seconds == 0:
+                    msg = f"子任务将立即在本地提交发布，并设定平台于 {target_time} 正式公开"
+                else:
+                    msg = f"子任务将在本地错峰提交 ({run_time.strftime('%H:%M:%S')})，并设定平台于 {target_time} 正式公开"
+                await event_bus.emit_log(msg, task_id=task_id, subtask_id=subtask_id)
 
             elif mode == "local_staggered":
                 # 本地定时唤醒发布
@@ -94,9 +102,11 @@ class SchedulerService:
                     id=f"subtask_{subtask_id}",
                     replace_existing=True
                 )
-                await event_bus.emit_log(
-                    f"子任务已预约在指定时间错峰触发: {run_time.strftime('%Y-%m-%d %H:%M:%S')}"
-                )
+                if delay_seconds == 0:
+                    msg = f"子任务已预约在指定时间准点触发: {run_time.strftime('%Y-%m-%d %H:%M:%S')}"
+                else:
+                    msg = f"子任务已预约在指定时间错峰触发: {run_time.strftime('%Y-%m-%d %H:%M:%S')}"
+                await event_bus.emit_log(msg, task_id=task_id, subtask_id=subtask_id)
 
     def cancel_subtask_job(self, subtask_id: str) -> bool:
         """从 APScheduler 队列中安全移除指定子任务的作业"""

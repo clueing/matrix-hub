@@ -7,6 +7,7 @@ from fastapi.responses import FileResponse
 
 from app.core.config import settings
 from app.core.database import init_db
+import app.models
 from app.api import api_router, ws_router
 from app.services.scheduler_service import scheduler_service
 from app.drivers.playwright_driver import playwright_driver

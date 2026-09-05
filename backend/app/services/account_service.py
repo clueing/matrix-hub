@@ -82,6 +82,9 @@ class AccountService:
                 proxy_url=proxy_url
             )
 
+            # 挂载 CDP Screencast 实时屏幕推流 (Manus 风格视窗)
+            await playwright_driver.start_screencast(page, account_id=account_id)
+
             # 获取二维码并推流到前端 (耗时约 1~2 秒)
             qrcode_b64 = await adapter.get_login_qrcode(page)
             if qrcode_b64:
@@ -137,8 +140,11 @@ class AccountService:
             await event_bus.emit_log(f"登录流程发生异常: {str(e)}", level="ERROR", account_id=account_id)
         finally:
             self._active_tasks.pop(account_id, None)
+            if page:
+                await playwright_driver.stop_screencast(page)
             if context:
                 await playwright_driver.close_context(context, page)
+            await event_bus.broadcast("screencast_stopped", {"account_id": account_id})
 
     async def check_account_health(self, db: AsyncSession, account_id: str) -> Dict[str, Any]:
         """对单个账号触发轻量级心跳测试，判断 Cookie 是否仍然有效"""

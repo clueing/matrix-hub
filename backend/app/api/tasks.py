@@ -113,6 +113,7 @@ async def create_task(payload: CreateTaskRequest, db: AsyncSession = Depends(get
 
         subtasks_to_schedule.append({
             "id": subtask.id,
+            "task_id": task.id,
             "schedule_mode": payload.schedule_mode,
             "scheduled_at": final_time
         })
@@ -363,4 +364,22 @@ async def delete_single_subtask(subtask_id: str, db: AsyncSession = Depends(get_
 
     await db.commit()
     return {"code": 0, "message": "子任务已成功删除"}
+
+
+@router.get("/{task_id}/logs", summary="获取指定任务的持久化历史执行日志")
+async def get_task_logs(
+    task_id: str,
+    subtask_id: Optional[str] = None,
+    limit: int = 500,
+    db: AsyncSession = Depends(get_db)
+):
+    """查询保存于本地 SQLite 数据库的持久化执行日志，关机或重启后依然完整保留"""
+    from app.models.task import TaskLog
+    query = select(TaskLog).where(TaskLog.task_id == task_id)
+    if subtask_id:
+        query = query.where(TaskLog.subtask_id == subtask_id)
+    query = query.order_by(TaskLog.created_at.asc()).limit(limit)
+    res = await db.execute(query)
+    logs = res.scalars().all()
+    return {"code": 0, "data": [log.to_dict() for log in logs]}
 
