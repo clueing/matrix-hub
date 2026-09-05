@@ -9,6 +9,7 @@ from sqlalchemy import select, delete
 
 from app.core.database import get_db
 from app.core.config import settings
+from app.core.event_bus import event_bus
 from app.models.account import Account
 from app.services.account_service import account_service
 
@@ -105,6 +106,7 @@ async def delete_account(account_id: str, db: AsyncSession = Depends(get_db)):
 
     await db.delete(acc)
     await db.commit()
+    await event_bus.broadcast("account_deleted", {"account_id": account_id})
     return {"code": 0, "message": "账号及本地会话已彻底删除"}
 
 @router.get("/{account_id}/export", summary="导出单账号凭证包 (.zip)")

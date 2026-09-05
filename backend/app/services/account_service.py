@@ -70,6 +70,7 @@ class AccountService:
 
         account.storage_path = str(settings.SESSIONS_DIR / account.id)
         await db.commit()
+        await event_bus.broadcast("account_status_changed", account.to_dict())
 
         # 2. 中止该账号可能存在的历史残留任务并释放文件锁
         old_task = self._active_tasks.pop(account.id, None)

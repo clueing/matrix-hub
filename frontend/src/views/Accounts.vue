@@ -251,7 +251,7 @@
           <div class="flex flex-col items-center justify-center rounded-lg border border-border bg-muted/20 p-6 min-h-[200px]">
             <div v-if="qrcodeBase64" class="flex flex-col items-center gap-3">
               <div class="bg-white p-2 rounded-lg border border-border shadow-sm">
-                <img :src="qrcodeBase64" alt="登录二维码" class="h-44 w-44 object-contain" />
+                <img :src="qrcodeBase64.startsWith('data:') ? qrcodeBase64 : ('data:image/png;base64,' + qrcodeBase64)" alt="登录二维码" class="h-44 w-44 object-contain" />
               </div>
               <p class="text-xs text-muted-foreground">
                 请打开对应平台 App 扫一扫授权登录
@@ -456,6 +456,8 @@ const closeLoginDialog = () => {
   isLoggingIn.value = false
   qrcodeBase64.value = ""
   currentLoginAccountId.value = ""
+  // 关闭弹窗时立即拉取最新列表，确保本地已新建的账号立刻呈现在页面上，无需手动刷新
+  loadAccounts()
 }
 
 const handleStartLogin = async () => {
@@ -465,6 +467,8 @@ const handleStartLogin = async () => {
   try {
     const res: any = await startLogin(loginForm.value)
     currentLoginAccountId.value = res.data.account_id
+    // 启动登录流程后，本地数据库已创建待登录账号记录，立即刷新列表
+    loadAccounts()
   } catch (e: any) {
     ElMessage.error(e.message || "初始化登录环境失败")
     isLoggingIn.value = false
@@ -476,6 +480,7 @@ const handleAssistFromDialog = async () => {
   try {
     await launchAssist(currentLoginAccountId.value)
     ElMessage.success("已在后台拉起桌面 Chrome 窗口，请在弹出的浏览器中操作！")
+    loadAccounts()
   } catch (e: any) {
     ElMessage.error(e.message)
   }
@@ -579,16 +584,23 @@ const initWebSocket = () => {
   ws.onmessage = (event) => {
     try {
       const msg = JSON.parse(event.data)
-      if (msg.event === "login_qrcode") {
-        qrcodeBase64.value = msg.data.qrcode
-      } else if (msg.event === "login_success") {
-        ElMessage.success(`账号【${msg.data.account_name}】登录授权成功！`)
-        loginDialogVisible.value = false
-        isLoggingIn.value = false
+      if (msg.event === "qrcode_updated" || msg.event === "login_qrcode") {
+        qrcodeBase64.value = msg.data.qrcode_base64 || msg.data.qrcode || ""
+      } else if (msg.event === "account_status_changed" || msg.event === "login_success") {
+        if (msg.data?.status === "active") {
+          ElMessage.success(`账号【${msg.data.account_name}】登录授权成功！`)
+          loginDialogVisible.value = false
+          isLoggingIn.value = false
+        }
+        loadAccounts()
+      } else if (msg.event === "account_deleted") {
         loadAccounts()
       } else if (msg.event === "login_failed") {
-        ElMessage.error(`登录失败: ${msg.data.error || "未知异常"}`)
+        ElMessage.error(`登录失败: ${msg.data?.error || "未知异常"}`)
         isLoggingIn.value = false
+        loadAccounts()
+      } else if (msg.event === "screencast_stopped") {
+        loadAccounts()
       }
     } catch (e) {}
   }
