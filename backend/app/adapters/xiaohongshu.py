@@ -231,6 +231,17 @@ class XiaohongshuAdapter(BasePublisherAdapter):
                 on_progress(level, f"[小红书发布] {msg}")
 
         try:
+            # 注入 Shadow DOM Hook，将 Web Component 内部的 Closed Shadow DOM 转换为 Open，以便获取内部真实【发布】按钮
+            try:
+                await page.add_init_script("""
+                    const origAttachShadow = Element.prototype.attachShadow;
+                    Element.prototype.attachShadow = function(init) {
+                        return origAttachShadow.call(this, { ...init, mode: 'open' });
+                    };
+                """)
+            except Exception:
+                pass
+
             log("正在进入小红书创作者中心发布页...")
             await page.goto(self.publish_url, timeout=30000, wait_until="domcontentloaded")
             await asyncio.sleep(2)
@@ -321,6 +332,13 @@ class XiaohongshuAdapter(BasePublisherAdapter):
                 log("未通过选择器直接匹配到描述区域，尝试向当前焦点直接键入描述...", level="WARNING")
                 await page.keyboard.type(full_desc, delay=20)
 
+            # 关闭可能弹出的联想话题下拉菜单，避免阻挡后续点击
+            try:
+                await page.keyboard.press("Escape")
+                await asyncio.sleep(0.5)
+            except Exception:
+                pass
+
             # 3. 自定义封面图上传 (如果有)
             cover_path = subtask_data.get("cover_path")
             if cover_path:
@@ -353,13 +371,78 @@ class XiaohongshuAdapter(BasePublisherAdapter):
                         await date_input.fill(dt_str)
                         await page.keyboard.press("Enter")
 
-            # 5. 提交发布
+            # 5. 等待发布按钮就绪并提交发布
+            log("正在检测并等待【发布】按钮就绪...")
+            for i in range(30):
+                is_ready = await page.evaluate("""() => {
+                    const host = document.querySelector('xhs-publish-btn');
+                    if (host) {
+                        const disabled = host.getAttribute('submit-disabled');
+                        if (disabled === 'false') return true;
+                        if (host.shadowRoot) {
+                            const btn = host.shadowRoot.querySelector('button.bg-red, button:not(.white)');
+                            if (btn && !btn.disabled) return true;
+                        }
+                    }
+                    const normalBtn = document.querySelector('button.publishBtn, button:has-text("发布"), .ce-btn.bg-red');
+                    if (normalBtn && !normalBtn.disabled) return true;
+                    return false;
+                }""")
+                if is_ready:
+                    break
+                await asyncio.sleep(1)
+
             log("正在点击提交【发布】按钮...")
-            publish_btn = await page.query_selector("button:has-text('发布'), .publishBtn")
-            if not publish_btn:
+            clicked = False
+
+            # 策略 1: 通过 Shadow DOM 内部红色按钮触发点击
+            clicked = await page.evaluate("""() => {
+                const host = document.querySelector('xhs-publish-btn');
+                if (host && host.shadowRoot) {
+                    const btn = host.shadowRoot.querySelector('button.bg-red, button:not(.white)');
+                    if (btn) {
+                        btn.click();
+                        return true;
+                    }
+                }
+                return false;
+            }""")
+
+            # 策略 2: 使用 Playwright Shadow Piercing 选择器定位并点击
+            if not clicked:
+                try:
+                    red_btn = page.locator("xhs-publish-btn button.bg-red, xhs-publish-btn >> button.bg-red, xhs-publish-btn >> button:has-text('发布')")
+                    if await red_btn.count() > 0:
+                        await red_btn.first.click()
+                        clicked = True
+                except Exception:
+                    pass
+
+            # 策略 3: 常规 DOM 选择器探测点击
+            if not clicked:
+                for sel in ["button:has-text('发布')", ".publishBtn", "button.ce-btn.bg-red", "div.publish-btn"]:
+                    btn = await page.query_selector(sel)
+                    if btn and await btn.is_visible():
+                        await btn.click()
+                        clicked = True
+                        break
+
+            # 策略 4: 基于 <xhs-publish-btn> 宿主容器坐标计算偏移模拟真实鼠标点击
+            # 按钮栏中“发布”按钮位于容器中心偏右 +72px 处
+            if not clicked:
+                host_el = await page.query_selector("xhs-publish-btn")
+                if host_el:
+                    box = await host_el.bounding_box()
+                    if box:
+                        target_x = box["x"] + box["width"] / 2 + 72
+                        target_y = box["y"] + box["height"] / 2
+                        log(f"通过组件坐标辅助模拟物理点击【发布】: ({target_x}, {target_y})")
+                        await page.mouse.click(target_x, target_y)
+                        clicked = True
+
+            if not clicked:
                 raise Exception("未找到小红书【发布】提交按钮")
 
-            await publish_btn.click()
             await asyncio.sleep(4)
 
             # 6. 验证发布结果
