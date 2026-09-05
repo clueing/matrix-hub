@@ -507,16 +507,22 @@ class DouyinAdapter(BasePublisherAdapter):
                     phone_str = phone_match.group(1) if phone_match else ""
 
                     # 自动触发点击【获取验证码】 (抖音创作者中心中为 .uc-ui-input_right 或 p.uc-ui-typography_description)
-                    get_code_btn = await page.query_selector(".uc-ui-input_right p, .uc-ui-input_right, p:has-text('获取验证码')")
-                    if get_code_btn and await get_code_btn.is_visible():
-                        btn_text = (await get_code_btn.inner_text()).strip()
-                        if "获取验证码" in btn_text and "重新" not in btn_text and "秒" not in btn_text and "s" not in btn_text.lower():
-                            log(f"正在自动点击【获取验证码】向手机 {phone_str} 发送短信验证码...")
-                            try:
-                                await get_code_btn.click()
-                            except Exception as click_err:
-                                log(f"点击获取验证码按钮异常: {click_err}", level="WARNING")
-                            await asyncio.sleep(0.5)
+                    for click_try in range(5):
+                        get_code_btn = await page.query_selector(".uc-ui-input_right p, .uc-ui-input_right, p:has-text('获取验证码')")
+                        if get_code_btn and await get_code_btn.is_visible():
+                            btn_text = (await get_code_btn.inner_text()).strip()
+                            if "获取验证码" in btn_text and "重新" not in btn_text and "秒" not in btn_text and "s" not in btn_text.lower():
+                                log(f"正在自动点击【获取验证码】向手机 {phone_str} 发送短信验证码...")
+                                try:
+                                    await get_code_btn.click()
+                                    await asyncio.sleep(0.8)
+                                    after_text = (await get_code_btn.inner_text()).strip()
+                                    if "秒" in after_text or "s" in after_text.lower():
+                                        log("短信验证码获取指令已成功触发 (已进入倒计时状态)", level="SUCCESS")
+                                        break
+                                except Exception as click_err:
+                                    log(f"点击获取验证码按钮异常: {click_err}", level="WARNING")
+                        await asyncio.sleep(0.5)
 
                     if on_verify_required:
                         log(f"已唤起 Web 端内二次验证通道，等待用户输入收到的短信验证码 (目标手机: {phone_str})...", level="WARNING")
