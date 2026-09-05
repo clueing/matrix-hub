@@ -570,3 +570,131 @@ class XiaohongshuAdapter(BasePublisherAdapter):
             err_msg = str(e)
             log(f"小红书发布过程出现异常: {err_msg}", level="ERROR")
             return {"success": False, "error": err_msg}
+
+    async def fetch_metrics(self, page: Page) -> Dict[str, Any]:
+        """
+        获取小红书创作者后台的大盘资产与笔记指标
+        采用 Playwright 接口响应拦截 + DOM 双兜底机制
+        """
+        metrics = {
+            "account": {
+                "followers_count": 0,
+                "likes_count": 0,
+                "total_views_count": 0,
+                "works_count": 0
+            },
+            "works": []
+        }
+
+        captured_notes = []
+        captured_account_base = {}
+        captured_personal_info = {}
+
+        async def handle_response(response):
+            try:
+                url = response.url
+                if any(k in url for k in ["note_list", "notes", "user_posted"]):
+                    data = await response.json()
+                    note_list = data.get("data", {}).get("notes") or data.get("data", {}).get("note_list") or []
+                    if isinstance(note_list, list):
+                        captured_notes.extend(note_list)
+                elif "datacenter/account/base" in url:
+                    data = await response.json()
+                    if isinstance(data, dict):
+                        captured_account_base.update(data.get("data", {}))
+                elif "creator/home/personal_info" in url or "galaxy/user/info" in url:
+                    data = await response.json()
+                    if isinstance(data, dict):
+                        captured_personal_info.update(data.get("data", {}))
+            except Exception:
+                pass
+
+        page.on("response", handle_response)
+
+        try:
+            notes_url = "https://creator.xiaohongshu.com/creator/notes"
+            await page.goto(notes_url, timeout=35000, wait_until="domcontentloaded")
+            await asyncio.sleep(3)
+
+            # 1. 从拦截到的接口 JSON 解析
+            if captured_personal_info:
+                metrics["account"]["followers_count"] = int(captured_personal_info.get("fans") or captured_personal_info.get("followers") or 0)
+                metrics["account"]["likes_count"] = int(captured_personal_info.get("liked") or captured_personal_info.get("likes") or 0)
+                metrics["account"]["works_count"] = int(captured_personal_info.get("notes_count") or captured_personal_info.get("post_num") or 0)
+
+            if captured_account_base:
+                thirty = captured_account_base.get("thirty", {})
+                impl_list = thirty.get("impl_count_list", [])
+                if impl_list:
+                    metrics["account"]["total_views_count"] = sum(int(item.get("count", 0)) for item in impl_list)
+
+            total_views = 0
+            for note in captured_notes:
+                note_id = str(note.get("note_id") or note.get("id") or "")
+                title = str(note.get("display_title") or note.get("title") or "")
+                views = int(note.get("read_count") or note.get("view_count") or note.get("imp_count") or 0)
+                likes = int(note.get("like_count") or note.get("likes") or 0)
+                comments = int(note.get("comment_count") or 0)
+                collects = int(note.get("fav_count") or note.get("collect_count") or 0)
+                shares = int(note.get("share_count") or 0)
+                total_views += views
+
+                work_url = f"https://www.xiaohongshu.com/explore/{note_id}" if note_id else ""
+
+                metrics["works"].append({
+                    "work_id": note_id,
+                    "title": title,
+                    "view_count": views,
+                    "like_count": likes,
+                    "comment_count": comments,
+                    "share_count": shares,
+                    "collect_count": collects,
+                    "work_url": work_url,
+                    "publish_time": str(note.get("time") or note.get("publish_time") or "")
+                })
+
+            # 2. DOM 兜底解析
+            dom_data = await page.evaluate(r'''() => {
+                const res = { account: {}, works: [] };
+                const bodyText = document.body ? document.body.innerText : '';
+                const fansMatch = bodyText.match(/粉丝[：:\s]*([0-9\.\w万]+)/);
+                if (fansMatch) res.account.followers = fansMatch[1];
+                const likeMatch = bodyText.match(/获赞与收藏[：:\s]*([0-9\.\w万]+)/) || bodyText.match(/获赞[：:\s]*([0-9\.\w万]+)/);
+                if (likeMatch) res.account.likes = likeMatch[1];
+                return res;
+            }''')
+
+            def parse_num(val_str):
+                if not val_str: return 0
+                s = str(val_str).replace('+', '')
+                if '万' in s or 'w' in s or 'W' in s:
+                    s = s.replace('万', '').replace('w', '').replace('W', '')
+                    try: return int(float(s) * 10000)
+                    except: return 0
+                try: return int(float(s))
+                except: return 0
+
+            if dom_data and dom_data.get("account"):
+                if not metrics["account"]["followers_count"] and dom_data["account"].get("followers"):
+                    metrics["account"]["followers_count"] = parse_num(dom_data["account"]["followers"])
+                if not metrics["account"]["likes_count"] and dom_data["account"].get("likes"):
+                    metrics["account"]["likes_count"] = parse_num(dom_data["account"]["likes"])
+
+            if total_views > 0:
+                metrics["account"]["total_views_count"] = total_views
+            elif metrics["works"]:
+                metrics["account"]["total_views_count"] = sum(w.get("view_count", 0) for w in metrics["works"])
+
+            if not metrics["account"]["works_count"]:
+                metrics["account"]["works_count"] = len(metrics["works"])
+
+        except Exception as e:
+            print(f"[XiaohongshuAdapter] fetch_metrics error: {e}")
+        finally:
+            try:
+                page.remove_listener("response", handle_response)
+            except Exception:
+                pass
+
+        return metrics
+

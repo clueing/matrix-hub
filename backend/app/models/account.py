@@ -18,8 +18,11 @@ class Account(Base):
     followers_count = Column(Integer, default=0)
     likes_count = Column(Integer, default=0)
     following_count = Column(Integer, default=0)
+    total_views_count = Column(Integer, default=0)
+    works_count = Column(Integer, default=0)
     last_login_at = Column(DateTime, nullable=True)
     last_check_at = Column(DateTime, nullable=True)
+    last_metrics_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -36,8 +39,11 @@ class Account(Base):
             "followers_count": self.followers_count or 0,
             "likes_count": self.likes_count or 0,
             "following_count": self.following_count or 0,
+            "total_views_count": self.total_views_count or 0,
+            "works_count": self.works_count or 0,
             "last_login_at": self.last_login_at.isoformat() if self.last_login_at else None,
             "last_check_at": self.last_check_at.isoformat() if self.last_check_at else None,
+            "last_metrics_at": self.last_metrics_at.isoformat() if self.last_metrics_at else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }

@@ -77,3 +77,34 @@ class BasePublisherAdapter(ABC):
         :return: 执行结果字典 {'success': bool, 'work_id': ..., 'work_url': ..., 'error': ...}
         """
         pass
+
+    async def fetch_metrics(self, page: Page) -> Dict[str, Any]:
+        """
+        获取该账号的最新主页大盘与作品列表指标
+        :param page: Playwright 页面对象
+        :return: 包含 account 与 works 列表的字典
+        格式:
+        {
+            "account": {
+                "followers_count": int,
+                "likes_count": int,
+                "total_views_count": int,
+                "works_count": int
+            },
+            "works": [
+                {
+                    "work_id": str,
+                    "title": str,
+                    "view_count": int,
+                    "like_count": int,
+                    "comment_count": int,
+                    "share_count": int,
+                    "collect_count": int,
+                    "work_url": str,
+                    "publish_time": str
+                }
+            ]
+        }
+        """
+        return {"account": {}, "works": []}
+

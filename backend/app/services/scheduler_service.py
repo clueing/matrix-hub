@@ -18,6 +18,20 @@ class SchedulerService:
     def start(self):
         if not self.scheduler.running:
             self.scheduler.start()
+            # 每日定时凌晨 03:30 自动执行一次全矩阵数据资产巡检
+            try:
+                from app.services.metrics_service import metrics_service
+                self.scheduler.add_job(
+                    metrics_service.sync_all_metrics,
+                    "cron",
+                    hour=3,
+                    minute=30,
+                    id="daily_metrics_sync",
+                    replace_existing=True
+                )
+            except Exception as e:
+                print(f"[Scheduler] 注册每日指标巡检任务失败: {e}")
+
 
     def shutdown(self):
         if self.scheduler.running:

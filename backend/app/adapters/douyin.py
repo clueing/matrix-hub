@@ -666,3 +666,122 @@ class DouyinAdapter(BasePublisherAdapter):
             err_msg = str(e)
             log(f"抖音发布流程出现异常: {err_msg}", level="ERROR")
             return {"success": False, "error": err_msg}
+
+    async def fetch_metrics(self, page: Page) -> Dict[str, Any]:
+        """
+        获取抖音创作者后台的大盘资产与作品指标
+        采用 Playwright 接口响应拦截 + DOM 双兜底机制
+        """
+        metrics = {
+            "account": {
+                "followers_count": 0,
+                "likes_count": 0,
+                "total_views_count": 0,
+                "works_count": 0
+            },
+            "works": []
+        }
+
+        captured_work_list = []
+        captured_user_info = {}
+
+        async def handle_response(response):
+            try:
+                url = response.url
+                if "work_list" in url:
+                    data = await response.json()
+                    awemes = data.get("aweme_list") or data.get("items") or []
+                    if isinstance(awemes, list):
+                        captured_work_list.extend(awemes)
+                elif "user/info" in url:
+                    data = await response.json()
+                    if isinstance(data, dict):
+                        captured_user_info.update(data)
+            except Exception:
+                pass
+
+        page.on("response", handle_response)
+
+        try:
+            manage_url = "https://creator.douyin.com/creator-micro/content/manage"
+            await page.goto(manage_url, timeout=35000, wait_until="domcontentloaded")
+            await asyncio.sleep(3)
+
+            # 1. 从拦截到的接口 JSON 解析
+            if captured_user_info:
+                prof = captured_user_info.get("user_profile") or captured_user_info.get("person_info") or captured_user_info
+                metrics["account"]["followers_count"] = int(prof.get("follower_count") or prof.get("followers") or 0)
+                metrics["account"]["likes_count"] = int(prof.get("total_favorited") or prof.get("likes") or 0)
+                metrics["account"]["works_count"] = int(prof.get("aweme_count") or prof.get("work_count") or 0)
+
+            total_views = 0
+            for item in captured_work_list:
+                stats = item.get("statistics") or item.get("stats") or {}
+                views = int(stats.get("play_count") or stats.get("views_count") or 0)
+                likes = int(stats.get("digg_count") or stats.get("like_count") or 0)
+                comments = int(stats.get("comment_count") or 0)
+                shares = int(stats.get("share_count") or 0)
+                collects = int(stats.get("collect_count") or 0)
+                total_views += views
+
+                work_id = str(item.get("aweme_id") or item.get("item_id") or "")
+                title = str(item.get("desc") or item.get("title") or "")
+                work_url = str(item.get("share_url") or (f"https://www.douyin.com/video/{work_id}" if work_id else ""))
+
+                metrics["works"].append({
+                    "work_id": work_id,
+                    "title": title,
+                    "view_count": views,
+                    "like_count": likes,
+                    "comment_count": comments,
+                    "share_count": shares,
+                    "collect_count": collects,
+                    "work_url": work_url,
+                    "publish_time": str(item.get("create_time") or "")
+                })
+
+            # 2. DOM 兜底解析
+            dom_data = await page.evaluate(r'''() => {
+                const res = { account: {}, works: [] };
+                const bodyText = document.body ? document.body.innerText : '';
+                const fansMatch = bodyText.match(/粉丝[：:\s]*([0-9\.\w万]+)/);
+                if (fansMatch) res.account.followers = fansMatch[1];
+                const likeMatch = bodyText.match(/获赞[：:\s]*([0-9\.\w万]+)/);
+                if (likeMatch) res.account.likes = likeMatch[1];
+                return res;
+            }''')
+
+            def parse_num(val_str):
+                if not val_str: return 0
+                s = str(val_str).replace('+', '')
+                if '万' in s or 'w' in s or 'W' in s:
+                    s = s.replace('万', '').replace('w', '').replace('W', '')
+                    try: return int(float(s) * 10000)
+                    except: return 0
+                try: return int(float(s))
+                except: return 0
+
+            if dom_data and dom_data.get("account"):
+                if not metrics["account"]["followers_count"] and dom_data["account"].get("followers"):
+                    metrics["account"]["followers_count"] = parse_num(dom_data["account"]["followers"])
+                if not metrics["account"]["likes_count"] and dom_data["account"].get("likes"):
+                    metrics["account"]["likes_count"] = parse_num(dom_data["account"]["likes"])
+
+            if total_views > 0:
+                metrics["account"]["total_views_count"] = total_views
+            elif metrics["works"]:
+                metrics["account"]["total_views_count"] = sum(w.get("view_count", 0) for w in metrics["works"])
+
+            if not metrics["account"]["works_count"]:
+                metrics["account"]["works_count"] = len(metrics["works"])
+
+        except Exception as e:
+            print(f"[DouyinAdapter] fetch_metrics error: {e}")
+        finally:
+            try:
+                page.remove_listener("response", handle_response)
+            except Exception:
+                pass
+
+        return metrics
+

@@ -229,9 +229,35 @@
                     </div>
                   </TableCell>
 
-                  <!-- 标题 -->
-                  <TableCell class="font-medium truncate max-w-xs" :title="sub.title">
-                    {{ sub.title }}
+                  <!-- 标题与数据资产胶囊 -->
+                  <TableCell class="font-medium max-w-xs">
+                    <div class="space-y-1 py-0.5">
+                      <div class="truncate text-foreground text-xs" :title="sub.title">{{ sub.title }}</div>
+                      <!-- 已发布作品的实时数据胶囊 -->
+                      <div v-if="sub.status === 'published'" class="flex items-center gap-2 text-[10px] text-muted-foreground font-mono">
+                        <span class="flex items-center gap-0.5" title="播放/阅读量">
+                          <Eye class="w-3 h-3 text-sky-500" />
+                          <span>{{ formatNumber(sub.view_count) }}</span>
+                        </span>
+                        <span class="flex items-center gap-0.5" title="获赞数">
+                          <Heart class="w-3 h-3 text-rose-500" />
+                          <span>{{ formatNumber(sub.like_count) }}</span>
+                        </span>
+                        <span class="flex items-center gap-0.5" title="评论数">
+                          <MessageSquare class="w-3 h-3 text-amber-500" />
+                          <span>{{ formatNumber(sub.comment_count) }}</span>
+                        </span>
+                        <a
+                          v-if="sub.platform_work_url"
+                          :href="sub.platform_work_url"
+                          target="_blank"
+                          class="hover:text-primary transition-colors ml-0.5"
+                          title="在平台原站打开作品"
+                        >
+                          <ExternalLink class="w-2.5 h-2.5" />
+                        </a>
+                      </div>
+                    </div>
                   </TableCell>
 
                   <!-- 调度方式 -->
@@ -491,7 +517,8 @@
 import { ref, computed, onMounted, onUnmounted } from "vue"
 import { ElMessage, ElMessageBox } from "element-plus"
 import {
-  ListChecks, Plus, Trash2, RefreshCw, Terminal, ChevronDown, Copy, ShieldCheck
+  ListChecks, Plus, Trash2, RefreshCw, Terminal, ChevronDown, Copy, ShieldCheck,
+  Eye, Heart, MessageSquare, ExternalLink
 } from "lucide-vue-next"
 
 import { Card } from "@/components/ui/card"
@@ -615,6 +642,14 @@ const calcProgress = (task: any) => {
 const formatTime = (timeStr?: string) => {
   if (!timeStr) return "-"
   return timeStr.slice(0, 19).replace("T", " ")
+}
+
+const formatNumber = (num?: number) => {
+  if (!num) return "0"
+  if (num >= 10000) {
+    return (num / 10000).toFixed(1) + "w"
+  }
+  return num.toLocaleString()
 }
 
 const getStatusBadgeVariant = (status: string) => {

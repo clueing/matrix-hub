@@ -65,6 +65,14 @@ class PublishSubtask(Base):
     error_message = Column(Text, nullable=True)
     platform_work_id = Column(String(128), nullable=True)
     platform_work_url = Column(Text, nullable=True)
+    # Metrics Data
+    view_count = Column(Integer, default=0)
+    like_count = Column(Integer, default=0)
+    comment_count = Column(Integer, default=0)
+    share_count = Column(Integer, default=0)
+    collect_count = Column(Integer, default=0)
+    last_metrics_at = Column(DateTime, nullable=True)
+
     executed_at = Column(DateTime, nullable=True)
     finished_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -94,6 +102,12 @@ class PublishSubtask(Base):
             "error_message": self.error_message,
             "platform_work_id": self.platform_work_id,
             "platform_work_url": self.platform_work_url,
+            "view_count": self.view_count or 0,
+            "like_count": self.like_count or 0,
+            "comment_count": self.comment_count or 0,
+            "share_count": self.share_count or 0,
+            "collect_count": self.collect_count or 0,
+            "last_metrics_at": self.last_metrics_at.isoformat() if self.last_metrics_at else None,
             "executed_at": self.executed_at.isoformat() if self.executed_at else None,
             "finished_at": self.finished_at.isoformat() if self.finished_at else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,

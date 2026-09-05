@@ -108,3 +108,14 @@ export const updateSettings = (settings: Record<string, string>) =>
 
 export const testWebhook = (data: { webhook_url: string; channel: string }) =>
   apiClient.post("/settings/test-webhook", data)
+
+// ==================== 数据资产与监控接口 ====================
+export const getMetricsOverview = () =>
+  apiClient.get("/metrics/overview")
+
+export const syncMetrics = (accountId?: string) =>
+  apiClient.post("/metrics/sync", accountId ? { account_id: accountId } : {})
+
+export const syncSingleAccountMetrics = (accountId: string) =>
+  apiClient.post(`/metrics/sync/${accountId}`)
+
