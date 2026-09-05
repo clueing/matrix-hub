@@ -80,7 +80,7 @@
             <div class="flex items-center gap-3 min-w-0 flex-1">
               <!-- 头像：移除突兀的右下角角标，还原清爽纯净的官方 Avatar 设计 -->
               <Avatar class="h-11 w-11 rounded-lg border border-border flex-shrink-0">
-                <AvatarImage :src="acc.avatar_url" />
+                <AvatarImage :src="acc.avatar_url" referrerpolicy="no-referrer" />
                 <AvatarFallback class="rounded-lg bg-muted text-foreground text-xs font-semibold">
                   {{ acc.account_name ? acc.account_name.slice(0, 2) : "账号" }}
                 </AvatarFallback>

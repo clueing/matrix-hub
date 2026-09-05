@@ -281,7 +281,7 @@
 
             <!-- 头像与信息 -->
             <Avatar class="w-7 h-7 rounded-md border border-border">
-              <AvatarImage :src="acc.avatar_url" />
+              <AvatarImage :src="acc.avatar_url" referrerpolicy="no-referrer" />
               <AvatarFallback class="text-[10px]">{{ acc.account_name.slice(0, 1) }}</AvatarFallback>
             </Avatar>
 

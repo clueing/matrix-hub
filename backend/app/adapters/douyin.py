@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import re
 from datetime import datetime
 from typing import Tuple, Optional, Dict, Any, Callable
 from playwright.async_api import Page
@@ -32,37 +33,29 @@ class DouyinAdapter(BasePublisherAdapter):
         return "https://creator.douyin.com/creator-micro/content/upload"
 
     async def check_login_status(self, page: Page) -> Tuple[bool, Optional[Dict[str, Any]]]:
-        """访问抖音创作者后台，校验当前会话 Cookie 是否有效"""
+        """访问抖音创作者后台，校验当前会话 Cookie 是否有效并同步创作者信息"""
         try:
             await page.goto(self.creator_url, timeout=30000, wait_until="domcontentloaded")
-            await asyncio.sleep(2)
+            await asyncio.sleep(2.5)
 
             # 抖音若未登录会重定向至根域登录页或包含 passport/login
             if "passport" in page.url or page.url.rstrip("/") == "https://creator.douyin.com":
                 login_btn = await page.query_selector(".login-button, div:has-text('登录')")
-                if login_btn:
+                if login_btn and await login_btn.is_visible():
                     return False, None
 
-            # 探测创作者昵称
-            name_selectors = [
-                ".semi-navigation-header-title", ".user-name", 
-                "span[class*='name']", "div[class*='account-name']",
-                ".header-user-info span"
-            ]
-            account_name = "抖音创作者"
-            for sel in name_selectors:
-                el = await page.query_selector(sel)
-                if el:
-                    text = (await el.inner_text()).strip()
-                    if text and len(text) < 30:
-                        account_name = text
-                        break
+            # 检查是否处于创作者后台或检测到登录要素
+            is_logged = "creator-micro" in page.url or "home" in page.url
+            if not is_logged:
+                indicator = await page.query_selector("img[src*='aweme-avatar'], .semi-avatar, .header-user-info")
+                if indicator and await indicator.is_visible():
+                    is_logged = True
 
-            return True, {
-                "name": account_name,
-                "uid": None,
-                "avatar": None
-            }
+            if not is_logged:
+                return False, None
+
+            info = await self._extract_user_info_from_page(page)
+            return True, info
         except Exception:
             return False, None
 
@@ -191,6 +184,38 @@ class DouyinAdapter(BasePublisherAdapter):
         likes_count = 0
         following_count = 0
 
+        # 获取页面纯文本用于正则匹配
+        page_text = ""
+        try:
+            page_text = await page.evaluate("() => (document.body ? document.body.innerText : '')")
+        except Exception:
+            pass
+
+        # 1. 提取抖音号/UID (如 "抖音号：614542688")
+        if page_text:
+            uid_match = re.search(r"抖音号[：:\s]*([a-zA-Z0-9_\-\.]+)", page_text)
+            if uid_match:
+                uid = uid_match.group(1).strip()
+
+        # 兜底：若未从文本匹配到，尝试从 localStorage 提取 user_unique_id
+        if not uid:
+            try:
+                ls_uid = await page.evaluate(r"""() => {
+                    try {
+                        const v = localStorage.getItem('SLARDARdouyin_creator');
+                        if (v) {
+                            const parsed = JSON.parse(decodeURIComponent(v));
+                            return parsed.userId || null;
+                        }
+                    } catch(e) {}
+                    return null;
+                }""")
+                if ls_uid:
+                    uid = str(ls_uid).strip()
+            except Exception:
+                pass
+
+        # 2. 提取创作者昵称
         name_selectors = [
             ".semi-navigation-header-title", ".user-name", 
             "span[class*='name']", "div[class*='account-name']",
@@ -201,51 +226,70 @@ class DouyinAdapter(BasePublisherAdapter):
                 el = await page.query_selector(sel)
                 if el:
                     text = (await el.inner_text()).strip()
-                    if text and len(text) < 30:
+                    if text and len(text) < 30 and "创作者" not in text:
                         account_name = text
                         break
             except Exception:
                 pass
 
+        if account_name == "抖音创作者" and page_text:
+            # 尝试通过正则在 "抖音号" 前一行匹配创作者昵称
+            name_match = re.search(r"([^\n\r]+)\n+抖音号", page_text)
+            if name_match:
+                found_name = name_match.group(1).strip()
+                if found_name and len(found_name) < 30 and "AI" not in found_name:
+                    account_name = found_name
+
+        # 3. 提取创作者头像 (抖音真实 CDN 包含 aweme-avatar 或 douyinpic.com)
         avatar_selectors = [
-            ".semi-avatar img", ".header-user-info img", 
-            "img[class*='avatar']", ".avatar img"
+            "img[src*='aweme-avatar']",
+            "img[src*='douyinpic.com']",
+            ".img-PeynF_",
+            ".semi-avatar img", 
+            ".header-user-info img", 
+            "img[class*='avatar']", 
+            ".avatar img"
         ]
         for sel in avatar_selectors:
             try:
                 el = await page.query_selector(sel)
                 if el:
                     src = await el.get_attribute("src")
-                    if src and not src.startswith("data:image/svg"):
+                    if src and not src.startswith("data:image/svg") and not src.startswith("data:image/"):
                         avatar = src
                         break
             except Exception:
                 pass
 
-        # 尝试从页面全局变量或 DOM 中提取粉丝、关注等
+        # 4. 从页面提取粉丝、获赞、关注数
         try:
             stats = await page.evaluate(r"""() => {
                 const res = { fans: 0, likes: 0, follows: 0 };
-                const text = document.body.innerText || '';
+                const text = document.body ? document.body.innerText : '';
+                
+                const parseNum = (match) => {
+                    if (!match) return 0;
+                    let v = match[1];
+                    if (v.includes('万') || v.toLowerCase().includes('w')) return Math.round(parseFloat(v) * 10000);
+                    if (v.toLowerCase().includes('k')) return Math.round(parseFloat(v) * 1000);
+                    return parseInt(v, 10) || 0;
+                };
+
                 const fansMatch = text.match(/粉丝[^\d]*(\d+[\.\d]*[wW万kK]?)/);
-                if (fansMatch) {
-                    let v = fansMatch[1];
-                    if (v.includes('万') || v.toLowerCase().includes('w')) res.fans = Math.round(parseFloat(v) * 10000);
-                    else if (v.toLowerCase().includes('k')) res.fans = Math.round(parseFloat(v) * 1000);
-                    else res.fans = parseInt(v) || 0;
-                }
-                const likeMatch = text.match(/(获赞|点赞)[^\d]*(\d+[\.\d]*[wW万kK]?)/);
-                if (likeMatch) {
-                    let v = likeMatch[2];
-                    if (v.includes('万') || v.toLowerCase().includes('w')) res.likes = Math.round(parseFloat(v) * 10000);
-                    else if (v.toLowerCase().includes('k')) res.likes = Math.round(parseFloat(v) * 1000);
-                    else res.likes = parseInt(v) || 0;
-                }
+                res.fans = parseNum(fansMatch);
+
+                const likeMatch = text.match(/(?:获赞|点赞)[^\d]*(\d+[\.\d]*[wW万kK]?)/);
+                res.likes = parseNum(likeMatch);
+
+                const followMatch = text.match(/关注[^\d]*(\d+[\.\d]*[wW万kK]?)/);
+                res.follows = parseNum(followMatch);
+
                 return res;
             }""")
             if stats:
                 fans_count = stats.get("fans", 0)
                 likes_count = stats.get("likes", 0)
+                following_count = stats.get("follows", 0)
         except Exception:
             pass
 
