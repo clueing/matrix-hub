@@ -337,36 +337,89 @@ class DouyinAdapter(BasePublisherAdapter):
             log(f"正在上传原始视频: {video_path}")
             await file_input.set_input_files(video_path)
 
-            # 抖音会拉取视频切片并做本地预览初始化，等待表单变为可用
-            log("等待视频上传与基础信息解析...")
-            for _ in range(60):
+            # 轮询等待视频上传并服务端解析就绪 (最长等待 180 秒)
+            log("正在上传视频并等待服务端转码解析...")
+            upload_finished = False
+            for wait_idx in range(90):
                 await asyncio.sleep(2)
-                editor = await page.query_selector(
-                    "div[contenteditable='true'], .zone-container, textarea[placeholder*='作品描述']"
-                )
-                if editor and await editor.is_visible():
-                    break
-            else:
-                log("上传等待超时，尝试继续填写元数据...", level="WARNING")
 
-            # 1. 组装并填写作品描述与话题标签 (抖音标题与描述合二为一)
+                # 检测并关闭新功能遮罩或引导气泡 (如 "视频预览功能 [我知道了]")
+                try:
+                    got_it = await page.query_selector("button:has-text('我知道了'), div:has-text('我知道了')")
+                    if got_it and await got_it.is_visible():
+                        await got_it.click()
+                        await asyncio.sleep(0.3)
+                except Exception:
+                    pass
+
+                # 探测视频是否上传解析完毕 (右侧面板出现重新上传按钮或手机播放预览)
+                reupload = await page.query_selector("div:has-text('重新上传'), span:has-text('重新上传'), button:has-text('重新上传')")
+                if reupload and await reupload.is_visible():
+                    upload_finished = True
+                    log("视频文件上传解析完毕！")
+                    break
+
+                # 提取上传进度并在每 10 秒输出一次进度
+                if wait_idx % 5 == 0:
+                    try:
+                        progress_text = await page.evaluate(r"""() => {
+                            const match = document.body ? document.body.innerText.match(/(\d+[\.\d]*%|\d+MB\/\d+MB)/) : null;
+                            return match ? match[0] : null;
+                        }""")
+                        if progress_text:
+                            log(f"视频上传进度: {progress_text}...")
+                    except Exception:
+                        pass
+            else:
+                log("视频上传等待超时，尝试继续填写元数据...", level="WARNING")
+
+            # 1. 填写独立作品标题 (抖音官方标题上限 30 字)
             title = subtask_data.get("title", "")
+            title_30 = title[:30] if len(title) > 30 else title
+            if title_30:
+                log(f"正在填写作品标题: {title_30}")
+                title_input = await page.query_selector("input[placeholder*='填写作品标题'], input.semi-input")
+                if title_input and await title_input.is_visible():
+                    await title_input.click()
+                    await title_input.fill(title_30)
+                    await asyncio.sleep(0.3)
+
+            # 2. 填写作品描述与话题标签 (转换为官方蓝色话题实体)
             description = subtask_data.get("description", "")
             tags = subtask_data.get("tags") or []
-            tag_text = " " + " ".join([f"#{t.strip('#')}" for t in tags]) if tags else ""
-            
-            # 整合为总描述文本
-            full_text = f"{title}\n{description}{tag_text}".strip()
-            log(f"正在填写作品标题与话题描述 ({len(tags)} 个标签)...")
+            log(f"正在填写作品描述 (包含 {len(tags)} 个话题标签)...")
 
-            desc_box = await page.query_selector(
-                "div[contenteditable='true'], .zone-container, textarea[placeholder*='作品描述']"
-            )
+            desc_box = await page.query_selector("div[contenteditable='true'], .zone-container")
             if desc_box:
                 await desc_box.click()
-                await page.keyboard.type(full_text, delay=25)
+                if description:
+                    await page.keyboard.type(description, delay=20)
+                    await asyncio.sleep(0.3)
 
-            # 2. 封面图设置 (如果有自定义封面)
+                # 逐个注入抖音官方话题标签
+                if tags:
+                    log(f"正在将 {len(tags)} 个话题标签转换为平台官方话题节点...")
+                    for tag in tags:
+                        tag_clean = str(tag).strip().lstrip("#").strip()
+                        if not tag_clean:
+                            continue
+
+                        # 优先点击编辑框下方的“#添加话题”按钮以拉起话题推荐
+                        topic_btn = await page.query_selector("div[class*='toolbar-button']:has-text('添加话题'), span:has-text('添加话题')")
+                        if topic_btn and await topic_btn.is_visible():
+                            await topic_btn.click()
+                        else:
+                            await page.keyboard.type(" #")
+
+                        await asyncio.sleep(0.3)
+                        await page.keyboard.type(tag_clean, delay=40)
+                        await asyncio.sleep(0.6)
+
+                        # 敲击回车选中联想话题
+                        await page.keyboard.press("Enter")
+                        await asyncio.sleep(0.4)
+
+            # 3. 封面图设置 (如果有自定义封面)
             cover_path = subtask_data.get("cover_path")
             if cover_path:
                 log(f"检测到自定义封面图，准备上传: {cover_path}")
@@ -383,7 +436,7 @@ class DouyinAdapter(BasePublisherAdapter):
                         if confirm_btn:
                             await confirm_btn.click()
 
-            # 3. 平台原生定时发布
+            # 4. 平台原生定时发布
             schedule_mode = subtask_data.get("schedule_mode")
             scheduled_at = subtask_data.get("scheduled_at")
             if schedule_mode == "platform_native" and scheduled_at:
@@ -403,25 +456,59 @@ class DouyinAdapter(BasePublisherAdapter):
                         await date_picker.fill(dt_str)
                         await page.keyboard.press("Enter")
 
-            # 4. 提交发布
-            log("正在提交发布...")
-            publish_btn = await page.query_selector("button:has-text('发布'), .button-publish")
+            # 5. 滚动到页面底部定位真实的表单提交【发布】按钮 (严苛排除导航栏按钮)
+            log("正在检测并定位表单提交【发布】按钮...")
+            await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+            await asyncio.sleep(1)
+
+            # 严苛排除左侧导航栏的菜单按钮 (如 .header-button-KP2xn1 '作品发布')
+            publish_btn = await page.query_selector(
+                "button.primary-cECiOJ:has-text('发布'), button.button-dhlUZE:has-text('发布'), button.fixed-J9O8Yw:has-text('发布')"
+            )
             if not publish_btn:
-                raise Exception("未找到抖音【发布】按钮")
+                btns = await page.query_selector_all("button")
+                for b in btns:
+                    txt = (await b.inner_text()).strip()
+                    cls = (await b.get_attribute("class")) or ""
+                    if txt == "发布" and "header-button" not in cls and "master-button" not in cls:
+                        publish_btn = b
+                        break
 
+            if not publish_btn:
+                raise Exception("未找到抖音表单底部的【发布】提交按钮")
+
+            await publish_btn.scroll_into_view_if_needed()
+            log("正在点击提交【发布】按钮...")
             await publish_btn.click()
-            await asyncio.sleep(4)
+            await asyncio.sleep(2)
 
-            # 5. 校验结果
-            for _ in range(15):
+            # 6. 校验发布结果与安全验证感知 (彻底杜绝以 'content' 为依据的假阳性判断)
+            upload_url = self.publish_url
+            for sec in range(60):
                 await asyncio.sleep(1)
-                page_text = await page.content()
-                if "发布成功" in page_text or "manage" in page.url or "content" in page.url:
+                curr_url = page.url
+                page_text = await page.evaluate("() => document.body ? document.body.innerText : ''")
+
+                # 1) 检测是否弹出短信验证码或人机验证
+                if "短信验证码" in page_text or "人机验证" in page_text or "滑动验证" in page_text:
+                    log("检测到抖音触发安全验证（短信验证码或人机滑块），请在浏览器视窗中完成验证...", level="WARNING")
+                    # 持续等待用户在视窗中完成验证
+                    if sec > 45:
+                        return {"success": False, "error": "抖音发布触发安全短信验证码/人机验证，等待超时未完成"}
+                    continue
+
+                # 2) 检测是否成功跳转至内容管理列表
+                if "manage" in curr_url or "发布成功" in page_text or "已发布" in page_text or "作品已提交" in page_text:
                     log("抖音作品已成功发布！", level="SUCCESS")
                     return {"success": True, "error": None}
 
-            log("抖音作品发布指令已成功提交", level="SUCCESS")
-            return {"success": True, "error": None}
+                # 3) 检查 URL 发生跳转且脱离了上传发布编辑页
+                if "upload" not in curr_url and "post" not in curr_url and "creator-micro" in curr_url:
+                    log("抖音作品已成功发布！", level="SUCCESS")
+                    return {"success": True, "error": None}
+
+            log("抖音发布等待超时，未能确认发布成功", level="ERROR")
+            return {"success": False, "error": "发布提交后未检测到成功标志，可能处于审核或需要人工验证"}
 
         except Exception as e:
             err_msg = str(e)

@@ -368,16 +368,11 @@ class XiaohongshuAdapter(BasePublisherAdapter):
                 log("未通过选择器直接匹配到标题输入框，尝试向当前焦点直接键入标题...", level="WARNING")
                 await page.keyboard.type(xhs_title, delay=25)
 
-            # 2. 填写正文描述与话题标签
+            # 2. 填写正文描述与话题标签 (转换为官方 Tiptap 富文本话题节点)
             description = subtask_data.get("description") or ""
             tags = subtask_data.get("tags") or []
-            if tags:
-                tag_str = " " + " ".join([f"#{t.strip('#')}" for t in tags])
-                full_desc = description + tag_str
-            else:
-                full_desc = description
 
-            log(f"正在填写正文描述及 {len(tags)} 个话题标签...")
+            log(f"正在填写正文描述 (包含 {len(tags)} 个话题标签)...")
             desc_selectors = [
                 "#post-textarea",
                 ".post-content",
@@ -386,17 +381,45 @@ class XiaohongshuAdapter(BasePublisherAdapter):
                 ".ql-editor",
                 "div[class*='editor']",
             ]
-            desc_ok = await self._safe_input_text(page, desc_selectors, full_desc, log_fn=log)
+            desc_ok = await self._safe_input_text(page, desc_selectors, description, log_fn=log)
             if not desc_ok:
                 log("未通过选择器直接匹配到描述区域，尝试向当前焦点直接键入描述...", level="WARNING")
-                await page.keyboard.type(full_desc, delay=20)
+                await page.keyboard.type(description, delay=20)
 
-            # 关闭可能弹出的联想话题下拉菜单，避免阻挡后续点击
-            try:
-                await page.keyboard.press("Escape")
-                await asyncio.sleep(0.5)
-            except Exception:
-                pass
+            # 逐个将标签输入并通过回车确认转换为小红书官方富文本话题实体
+            if tags:
+                log(f"正在将 {len(tags)} 个话题标签转换为平台官方话题节点...")
+                target_desc = None
+                for sel in desc_selectors:
+                    target_desc = await page.query_selector(sel)
+                    if target_desc and await target_desc.is_visible():
+                        break
+
+                if target_desc:
+                    await target_desc.click()
+                    await asyncio.sleep(0.2)
+
+                for tag in tags:
+                    tag_clean = str(tag).strip().lstrip("#").strip()
+                    if not tag_clean:
+                        continue
+
+                    # 键入空格后输入 # 和标签名称，触发联想浮层
+                    await page.keyboard.type(" ")
+                    await page.keyboard.type(f"#{tag_clean}", delay=40)
+                    await asyncio.sleep(0.6)
+
+                    # 检测联想候选项并敲击回车，生成官方 <a class="tiptap-topic"> 实体
+                    try:
+                        suggestion = await page.query_selector(".item.is-selected, .suggestion, div[class*='item'][class*='selected']")
+                        if suggestion and await suggestion.is_visible():
+                            await page.keyboard.press("Enter")
+                        else:
+                            await page.keyboard.press("Enter")
+                    except Exception:
+                        await page.keyboard.press("Enter")
+
+                    await asyncio.sleep(0.3)
 
             # 3. 自定义封面图上传 (如果有)
             cover_path = subtask_data.get("cover_path")
