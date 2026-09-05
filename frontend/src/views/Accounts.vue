@@ -1,247 +1,448 @@
 <template>
-  <div class="accounts-container">
-    <!-- 顶部操作栏 -->
-    <el-card shadow="never" class="mb-4">
-      <div class="flex justify-between items-center">
-        <div class="flex items-center gap-4">
-          <span class="font-bold text-lg">自媒体矩阵账号</span>
-          <el-radio-group v-model="platformFilter" size="small" @change="loadAccounts">
-            <el-radio-button label="">全部平台</el-radio-button>
-            <el-radio-button label="xiaohongshu">小红书</el-radio-button>
-            <el-radio-button label="douyin">抖音</el-radio-button>
-            <el-radio-button label="kuaishou">快手</el-radio-button>
-            <el-radio-button label="channels">微信视频号</el-radio-button>
-          </el-radio-group>
+  <div class="space-y-6">
+    <!-- 顶部操作与筛选栏 -->
+    <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      <!-- 左侧：搜索与平台筛选胶囊 -->
+      <div class="flex flex-wrap items-center gap-2.5">
+        <div class="relative w-64">
+          <Search class="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
+          <Input
+            v-model="searchQuery"
+            placeholder="搜索账号名称或 UID..."
+            class="pl-9 h-9 bg-white text-xs"
+          />
         </div>
-        <div class="flex gap-2">
-          <el-button type="primary" @click="openLoginDialog">
-            <el-icon class="mr-1"><Plus /></el-icon> 扫码添加账号
-          </el-button>
-          <el-button type="success" @click="openImportDialog">
-            <el-icon class="mr-1"><Upload /></el-icon> 导入账号凭证 (.zip)
-          </el-button>
+
+        <div class="flex items-center rounded-lg border border-slate-200 bg-white p-1 text-xs shadow-sm">
+          <button
+            v-for="tab in platformTabs"
+            :key="tab.value"
+            @click="platformFilter = tab.value"
+            class="rounded-md px-2.5 py-1 font-medium transition-all"
+            :class="[
+              platformFilter === tab.value
+                ? 'bg-slate-900 text-white shadow-sm'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+            ]"
+          >
+            {{ tab.label }}
+            <span class="ml-1 text-[10px] opacity-70">
+              ({{ getPlatformCount(tab.value) }})
+            </span>
+          </button>
         </div>
       </div>
-    </el-card>
 
-    <!-- 账号卡片矩阵网格 -->
-    <el-row :gutter="16" v-loading="loading">
-      <el-col :span="8" v-for="acc in accounts" :key="acc.id" class="mb-4">
-        <el-card shadow="hover" class="account-card">
+      <!-- 右侧：全局操作按钮 -->
+      <div class="flex items-center gap-2">
+        <Button variant="outline" size="sm" class="h-9 gap-1.5" @click="handleBatchCheck">
+          <RefreshCw class="h-3.5 w-3.5" :class="{ 'animate-spin': isBatchChecking }" />
+          <span>全量巡检</span>
+        </Button>
+
+        <Button variant="outline" size="sm" class="h-9 gap-1.5" @click="importDialogVisible = true">
+          <Upload class="h-3.5 w-3.5" />
+          <span>导入凭证</span>
+        </Button>
+
+        <Button variant="glow" size="sm" class="h-9 gap-1.5 font-semibold" @click="openLoginDialog">
+          <Plus class="h-4 w-4" />
+          <span>扫码添加账号</span>
+        </Button>
+      </div>
+    </div>
+
+    <!-- 账号卡片网格 -->
+    <div v-if="filteredAccounts.length === 0" class="flex flex-col items-center justify-center rounded-xl border border-dashed border-slate-200 bg-white p-16 text-center">
+      <div class="flex h-14 w-14 items-center justify-center rounded-full bg-blue-50 text-blue-600 mb-3">
+        <Users2 class="h-7 w-7" />
+      </div>
+      <h3 class="text-sm font-bold text-slate-800">暂无匹配账号</h3>
+      <p class="mt-1 max-w-sm text-xs text-slate-400">
+        {{ accounts.length === 0 ? "尚未授权任何自媒体账号，点击上方【扫码添加账号】快速接入小红书或抖音。" : "未找到符合筛选条件的账号。" }}
+      </p>
+      <Button v-if="accounts.length === 0" variant="glow" size="sm" class="mt-4" @click="openLoginDialog">
+        立即扫码接入
+      </Button>
+    </div>
+
+    <div v-else class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+      <Card
+        v-for="acc in filteredAccounts"
+        :key="acc.id"
+        class="group relative overflow-hidden border-slate-200/80 bg-white shadow-sm hover:shadow-md transition-all duration-200 hover:-translate-y-0.5"
+      >
+        <CardContent class="p-4 space-y-3.5">
           <!-- 头部：头像、账号名、平台徽标与在线状态 -->
-          <div class="card-header-row">
-            <div class="account-profile">
-              <el-avatar 
-                :size="48" 
-                :src="acc.avatar_url" 
-                class="account-avatar"
-              >
-                {{ acc.account_name ? acc.account_name.slice(0, 2) : "平台" }}
-              </el-avatar>
-              <div class="account-titles">
-                <div class="account-name-line">
-                  <span class="account-name" :title="acc.account_name">{{ acc.account_name }}</span>
-                  <el-tag size="small" :type="getPlatformTagType(acc.platform)" effect="light">
+          <div class="flex items-start justify-between gap-3">
+            <div class="flex items-center gap-3 min-w-0 flex-1">
+              <div class="relative flex-shrink-0">
+                <Avatar class="h-12 w-12 border border-slate-200 shadow-sm">
+                  <AvatarImage :src="acc.avatar_url" />
+                  <AvatarFallback class="bg-gradient-to-br from-indigo-500 to-blue-600 text-white font-bold text-sm">
+                    {{ acc.account_name ? acc.account_name.slice(0, 2) : "平台" }}
+                  </AvatarFallback>
+                </Avatar>
+                <!-- 平台小角标 -->
+                <span
+                  class="absolute -bottom-1 -right-1 flex h-4.5 w-4.5 items-center justify-center rounded-full text-[9px] font-bold text-white shadow-sm ring-2 ring-white"
+                  :class="getPlatformBadgeColor(acc.platform)"
+                >
+                  {{ getPlatformShort(acc.platform) }}
+                </span>
+              </div>
+
+              <div class="min-w-0 flex-1">
+                <div class="flex items-center gap-2">
+                  <h4 class="font-bold text-sm text-slate-900 truncate" :title="acc.account_name">
+                    {{ acc.account_name }}
+                  </h4>
+                  <Badge variant="outline" class="text-[10px] px-1.5 py-0 flex-shrink-0">
                     {{ getPlatformLabel(acc.platform) }}
-                  </el-tag>
+                  </Badge>
                 </div>
-                <div class="account-group-line">
-                  <span class="group-tag">{{ acc.group_name }}</span>
+                <div class="mt-1 flex items-center gap-2 text-xs text-slate-400">
+                  <span class="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-600">
+                    {{ acc.group_name }}
+                  </span>
                 </div>
               </div>
             </div>
-            <div class="status-badge-wrap">
-              <el-tag v-if="acc.status === 'active'" type="success" effect="dark" size="small">在线有效</el-tag>
-              <el-tag v-else-if="acc.status === 'expired'" type="danger" effect="dark" size="small">登录失效</el-tag>
-              <el-tag v-else type="info" size="small">未授权</el-tag>
+
+            <!-- 在线状态 -->
+            <div class="flex-shrink-0">
+              <Badge v-if="acc.status === 'active'" variant="success" class="gap-1 text-[11px]">
+                <span class="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                <span>有效</span>
+              </Badge>
+              <Badge v-else-if="acc.status === 'expired'" variant="destructive" class="gap-1 text-[11px]">
+                <span class="h-1.5 w-1.5 rounded-full bg-rose-500"></span>
+                <span>已失效</span>
+              </Badge>
+              <Badge v-else variant="secondary" class="text-[11px]">
+                未授权
+              </Badge>
             </div>
           </div>
 
-          <!-- 账号 ID / UID 识别条 -->
-          <div class="uid-strip">
-            <div class="uid-content">
-              <span class="uid-prefix">UID:</span>
-              <span class="uid-text" :title="acc.uid || '未获取'">
-                {{ acc.uid || "未获取 (点击检测同步)" }}
+          <!-- UID 识别条 -->
+          <div class="flex items-center justify-between rounded-lg border border-slate-100 bg-slate-50/80 px-2.5 py-1.5 text-xs">
+            <div class="flex items-center gap-1.5 min-w-0 flex-1">
+              <span class="font-mono text-[11px] font-semibold text-slate-400">UID:</span>
+              <span class="truncate font-mono font-medium text-slate-700 select-all" :title="acc.uid || '未获取'">
+                {{ acc.uid || "未捕获 (点击检测同步)" }}
               </span>
             </div>
-            <el-button 
-              v-if="acc.uid" 
-              size="small" 
-              type="primary" 
-              link 
-              class="copy-btn"
+            <button
+              v-if="acc.uid"
               @click="copyText(acc.uid)"
+              class="flex items-center gap-1 text-[11px] font-medium text-blue-600 hover:text-blue-700 ml-2 flex-shrink-0 active:scale-95"
             >
-              复制
-            </el-button>
+              <Copy class="h-3 w-3" />
+              <span>复制</span>
+            </button>
           </div>
 
-          <!-- 3列数据指标统计条 (粉丝数、点赞数、关注数) -->
-          <div class="stats-bar">
-            <div class="stat-col">
-              <div class="stat-number text-followers">
+          <!-- 3列核心数据指标看板 (粉丝/点赞/关注) -->
+          <div class="grid grid-cols-3 divide-x divide-slate-200/70 rounded-lg border border-slate-200/80 bg-gradient-to-b from-slate-50/70 to-slate-100/50 py-2.5 text-center">
+            <div class="px-2">
+              <div class="font-mono text-base font-bold text-slate-900 leading-tight">
                 {{ formatCount(acc.followers_count) }}
               </div>
-              <div class="stat-title">粉丝数量</div>
+              <div class="mt-0.5 text-[11px] text-slate-500">粉丝总数</div>
             </div>
-            <div class="stat-divider"></div>
-            <div class="stat-col">
-              <div class="stat-number text-likes">
+            <div class="px-2">
+              <div class="font-mono text-base font-bold text-rose-600 leading-tight">
                 {{ formatCount(acc.likes_count) }}
               </div>
-              <div class="stat-title">获赞与收藏</div>
+              <div class="mt-0.5 text-[11px] text-slate-500">获赞与收藏</div>
             </div>
-            <div class="stat-divider"></div>
-            <div class="stat-col">
-              <div class="stat-number text-following">
+            <div class="px-2">
+              <div class="font-mono text-base font-bold text-slate-700 leading-tight">
                 {{ formatCount(acc.following_count) }}
               </div>
-              <div class="stat-title">关注数量</div>
+              <div class="mt-0.5 text-[11px] text-slate-500">关注账号</div>
             </div>
           </div>
 
           <!-- 检测时间与状态 -->
-          <div class="account-meta">
+          <div class="flex items-center justify-between text-[11px] text-slate-400 pt-0.5">
             <span>最近检测: {{ acc.last_check_at ? acc.last_check_at.slice(0, 16).replace('T', ' ') : "未检测" }}</span>
-            <span v-if="checkingAccountId === acc.id" class="text-loading">正在同步数据...</span>
+            <span v-if="checkingAccountId === acc.id" class="text-blue-500 font-medium flex items-center gap-1">
+              <RefreshCw class="h-3 w-3 animate-spin" />
+              <span>同步数据中...</span>
+            </span>
           </div>
 
-          <!-- 操作按钮组 -->
-          <div class="card-footer">
-            <div class="action-btns">
-              <el-button 
-                size="small" 
-                type="primary" 
-                link 
-                :loading="checkingAccountId === acc.id" 
+          <!-- 底部操作按钮组 -->
+          <div class="flex items-center justify-between border-t border-slate-100 pt-3">
+            <div class="flex items-center gap-1.5">
+              <Button
+                variant="ghost"
+                size="xs"
+                class="h-7 text-xs text-slate-700 hover:text-blue-600 hover:bg-blue-50 gap-1 px-2"
+                :disabled="checkingAccountId === acc.id"
                 @click="handleCheckHealth(acc)"
               >
-                <el-icon><Refresh /></el-icon> 检测更新
-              </el-button>
-              <el-button size="small" type="warning" link @click="handleLaunchAssist(acc)">
-                <el-icon><Monitor /></el-icon> 呼出窗口
-              </el-button>
-              <el-button size="small" type="success" link @click="handleExport(acc)">
-                <el-icon><Download /></el-icon> 导出
-              </el-button>
+                <RefreshCw class="h-3 w-3" :class="{ 'animate-spin': checkingAccountId === acc.id }" />
+                <span>检测更新</span>
+              </Button>
+
+              <Button
+                variant="ghost"
+                size="xs"
+                class="h-7 text-xs text-amber-600 hover:text-amber-700 hover:bg-amber-50 gap-1 px-2"
+                @click="handleLaunchAssist(acc)"
+              >
+                <Monitor class="h-3 w-3" />
+                <span>呼出窗口</span>
+              </Button>
+
+              <Button
+                variant="ghost"
+                size="xs"
+                class="h-7 text-xs text-slate-600 hover:text-slate-800 hover:bg-slate-100 gap-1 px-2"
+                @click="handleExport(acc)"
+              >
+                <Download class="h-3 w-3" />
+                <span>导出</span>
+              </Button>
             </div>
-            <div>
-              <el-popconfirm title="确定要删除此账号及其独立缓存吗？" @confirm="handleDelete(acc.id)">
-                <template #reference>
-                  <el-button size="small" type="danger" link>删除</el-button>
-                </template>
-              </el-popconfirm>
+
+            <Button
+              variant="ghost"
+              size="xs"
+              class="h-7 text-xs text-rose-500 hover:text-rose-700 hover:bg-rose-50 px-2"
+              @click="confirmDelete(acc)"
+            >
+              <Trash2 class="h-3 w-3" />
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+
+    <!-- 扫码授权模态框 (Dialog) -->
+    <Dialog :open="loginDialogVisible" @update:open="val => { if (!val) closeLoginDialog() }">
+      <DialogContent class="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle class="text-base font-bold">自媒体账号免密扫码授权</DialogTitle>
+          <DialogDescription>
+            启动本地无头 Chromium 获取官方登录二维码，使用手机 App 扫码即可完成 Cookie 会话持久化。
+          </DialogDescription>
+        </DialogHeader>
+
+        <div class="space-y-4 py-2">
+          <div>
+            <label class="block text-xs font-semibold text-slate-700 mb-1.5">目标发布平台</label>
+            <div class="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                @click="loginForm.platform = 'xiaohongshu'"
+                :disabled="isLoggingIn"
+                class="flex items-center gap-2.5 rounded-lg border p-2.5 text-left transition-all"
+                :class="[
+                  loginForm.platform === 'xiaohongshu'
+                    ? 'border-red-500 bg-red-50/50 text-red-700 font-semibold shadow-sm'
+                    : 'border-slate-200 hover:bg-slate-50 text-slate-700'
+                ]"
+              >
+                <span class="flex h-6 w-6 items-center justify-center rounded-full bg-red-600 text-[10px] font-bold text-white">红</span>
+                <div>
+                  <div class="text-xs">小红书</div>
+                  <div class="text-[10px] text-slate-400 font-normal">creator.xiaohongshu.com</div>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                @click="loginForm.platform = 'douyin'"
+                :disabled="isLoggingIn"
+                class="flex items-center gap-2.5 rounded-lg border p-2.5 text-left transition-all"
+                :class="[
+                  loginForm.platform === 'douyin'
+                    ? 'border-blue-500 bg-blue-50/50 text-blue-700 font-semibold shadow-sm'
+                    : 'border-slate-200 hover:bg-slate-50 text-slate-700'
+                ]"
+              >
+                <span class="flex h-6 w-6 items-center justify-center rounded-full bg-slate-900 text-[10px] font-bold text-white">抖</span>
+                <div>
+                  <div class="text-xs">抖音</div>
+                  <div class="text-[10px] text-slate-400 font-normal">creator.douyin.com</div>
+                </div>
+              </button>
             </div>
           </div>
-        </el-card>
-      </el-col>
-    </el-row>
 
-    <!-- 空状态 -->
-    <el-empty v-if="!loading && accounts.length === 0" description="暂无矩阵账号，点击右上角【扫码添加账号】或【导入账号凭证】开始使用" />
+          <div>
+            <label class="block text-xs font-semibold text-slate-700 mb-1">账号所属分组</label>
+            <Input v-model="loginForm.group_name" placeholder="如：美食矩阵A组、生活博主" :disabled="isLoggingIn" />
+          </div>
 
-    <!-- 扫码添加账号模态框 -->
-    <el-dialog v-model="loginDialogVisible" title="添加/登录自媒体账号" width="480px" :close-on-click-modal="false" @close="closeLoginDialog">
-      <el-form :model="loginForm" label-width="90px">
-        <el-form-item label="目标平台">
-          <el-select v-model="loginForm.platform" placeholder="请选择平台" style="width: 100%" :disabled="isLoggingIn">
-            <el-option label="小红书 (creator.xiaohongshu.com)" value="xiaohongshu" />
-            <el-option label="抖音 (creator.douyin.com)" value="douyin" />
-            <el-option label="快手 (敬请期待)" value="kuaishou" disabled />
-            <el-option label="微信视频号 (敬请期待)" value="channels" disabled />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="账号分组">
-          <el-input v-model="loginForm.group_name" placeholder="如：美妆一号群、个人生活号" :disabled="isLoggingIn" />
-        </el-form-item>
-        <el-form-item label="独立代理IP">
-          <el-input v-model="loginForm.proxy_url" placeholder="可选: http://user:pass@ip:port" :disabled="isLoggingIn" />
-        </el-form-item>
-      </el-form>
+          <div>
+            <label class="block text-xs font-semibold text-slate-700 mb-1">独立代理 IP (可选)</label>
+            <Input v-model="loginForm.proxy_url" placeholder="格式: http://user:pass@ip:port" :disabled="isLoggingIn" />
+          </div>
 
-      <!-- 二维码呈现区 -->
-      <div v-if="isLoggingIn" class="qrcode-wrapper text-center my-4">
-        <div v-if="qrcodeBase64" class="inline-block p-2 border rounded bg-white shadow-sm">
-          <img :src="qrcodeBase64" alt="登录二维码" style="width: 220px; height: 220px; object-fit: contain;" />
-          <div class="text-sm text-gray-600 mt-2 font-medium">请打开对应手机 App 扫码登录</div>
+          <!-- 二维码显示区 -->
+          <div v-if="isLoggingIn" class="rounded-xl border border-slate-200 bg-slate-50/60 p-4 text-center">
+            <div v-if="qrcodeBase64" class="inline-block p-2 bg-white rounded-lg border border-slate-200 shadow-sm">
+              <img :src="qrcodeBase64" alt="登录二维码" class="h-48 w-48 object-contain mx-auto" />
+              <p class="text-xs font-medium text-slate-700 mt-2">请使用对应手机 App 扫码确认登录</p>
+            </div>
+            <div v-else class="py-10 flex flex-col items-center justify-center text-slate-400">
+              <RefreshCw class="h-7 w-7 animate-spin text-blue-600 mb-2" />
+              <p class="text-xs text-slate-600">正在拉起隔离浏览器提取官方登录二维码...</p>
+            </div>
+
+            <div class="mt-3 pt-3 border-t border-slate-200/80 flex flex-col items-center gap-1.5">
+              <p class="text-[11px] text-slate-400">遇到滑块拼图验证或二维码提取缓慢？</p>
+              <Button
+                variant="outline"
+                size="sm"
+                class="text-xs gap-1.5 text-amber-600 border-amber-200 bg-amber-50/50 hover:bg-amber-100"
+                :disabled="!currentLoginAccountId"
+                @click="handleAssistFromDialog"
+              >
+                <Monitor class="h-3.5 w-3.5" />
+                <span>呼出桌面窗口直接操作 (过滑块/手机验证)</span>
+              </Button>
+            </div>
+          </div>
         </div>
-        <div v-else class="py-10 flex flex-col items-center justify-center">
-          <el-icon class="is-loading text-3xl text-primary mb-2"><Loading /></el-icon>
-          <span class="text-sm text-gray-500">正在拉起隔离浏览器并提取二维码...</span>
-        </div>
-        <div class="mt-4 pt-3 border-t flex flex-col items-center gap-2">
-          <span class="text-xs text-gray-400">
-            若遇到拼图滑块验证或二维码提取缓慢，可一键呼出桌面窗口直接操作
-          </span>
-          <el-button 
-            type="warning" 
-            plain 
-            size="small" 
-            :disabled="!currentLoginAccountId" 
-            @click="handleAssistFromDialog"
+
+        <DialogFooter>
+          <Button variant="outline" size="sm" @click="closeLoginDialog">取消</Button>
+          <Button v-if="!isLoggingIn" variant="glow" size="sm" @click="handleStartLogin">
+            启动浏览器获取二维码
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <!-- 导入凭证模态框 (Dialog) -->
+    <Dialog :open="importDialogVisible" @update:open="val => importDialogVisible = val">
+      <DialogContent class="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle class="text-base font-bold">导入账号会话包 (.zip)</DialogTitle>
+          <DialogDescription>
+            支持导入由本平台导出的加密会话凭证包，系统将自动还原并校验连通性。
+          </DialogDescription>
+        </DialogHeader>
+
+        <div class="space-y-4 py-2">
+          <div
+            class="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-300 p-6 text-center transition-colors hover:border-blue-400 bg-slate-50/50 cursor-pointer"
+            @click="triggerFileSelect"
           >
-            <el-icon class="mr-1"><Monitor /></el-icon>
-            呼出桌面 Chrome 辅助窗口 (过滑块/扫码)
-          </el-button>
-        </div>
-      </div>
-
-      <template #footer>
-        <span class="dialog-footer">
-          <el-button @click="closeLoginDialog">取消</el-button>
-          <el-button v-if="!isLoggingIn" type="primary" @click="handleStartLogin">
-            获取登录二维码
-          </el-button>
-        </span>
-      </template>
-    </el-dialog>
-
-    <!-- 导入账号模态框 -->
-    <el-dialog v-model="importDialogVisible" title="导入账号凭证 (.zip)" width="450px">
-      <el-upload
-        class="upload-demo"
-        drag
-        action=""
-        :auto-upload="false"
-        :on-change="handleFileChange"
-        :limit="1"
-        accept=".zip"
-      >
-        <el-icon class="el-icon--upload"><UploadFilled /></el-icon>
-        <div class="el-upload__text">
-          将账号备份包拖到此处，或 <em>点击上传</em>
-        </div>
-        <template #tip>
-          <div class="el-upload__tip text-xs text-gray-400">
-            支持由本平台导出的 .zip 凭证包，系统将自动还原会话并执行连通性校验
+            <input
+              ref="fileInput"
+              type="file"
+              accept=".zip"
+              class="hidden"
+              @change="handleFileSelected"
+            />
+            <Upload class="h-8 w-8 text-slate-400 mb-2" />
+            <div v-if="selectedFile" class="font-medium text-xs text-blue-600">
+              已选文件: {{ selectedFile.name }}
+            </div>
+            <div v-else class="text-xs text-slate-600">
+              <span class="font-semibold text-blue-600">点击选择</span> 或拖拽 .zip 文件至此处
+            </div>
+            <p class="text-[11px] text-slate-400 mt-1">仅支持 MatrixHub 导出的 .zip 会话压缩包</p>
           </div>
-        </template>
-      </el-upload>
-      <div class="mt-3">
-        <el-checkbox v-model="overwriteOnImport">若账号已存在则覆盖已有会话</el-checkbox>
-      </div>
-      <template #footer>
-        <el-button @click="importDialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="importing" @click="submitImport">确认导入</el-button>
-      </template>
-    </el-dialog>
+
+          <div class="flex items-center justify-between rounded-lg border border-slate-100 bg-slate-50 p-2.5 text-xs">
+            <span class="text-slate-700">若账号已存在则覆盖已有会话</span>
+            <Switch :checked="overwriteOnImport" @update:checked="val => overwriteOnImport = val" />
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" size="sm" @click="importDialogVisible = false">取消</Button>
+          <Button variant="glow" size="sm" :disabled="!selectedFile || importing" @click="submitImport">
+            {{ importing ? "正在还原..." : "开始导入" }}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from "vue"
-import { ElMessage } from "element-plus"
-import { Plus, Upload, Refresh, Monitor, Download, Loading, UploadFilled } from "@element-plus/icons-vue"
-import { 
-  getAccounts, startLogin, checkAccountHealth, launchAssist, 
-  deleteAccount, getExportAccountUrl, importAccount 
+import { ref, computed, onMounted, onUnmounted } from "vue"
+import { ElMessage, ElMessageBox } from "element-plus"
+import { Card, CardContent } from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar"
+import { Input } from "@/components/ui/input"
+import { Switch } from "@/components/ui/switch"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog"
+import {
+  Search,
+  Plus,
+  Upload,
+  RefreshCw,
+  Monitor,
+  Download,
+  Trash2,
+  Copy,
+  Users2,
+} from "lucide-vue-next"
+import {
+  getAccounts,
+  startLogin,
+  checkAccountHealth,
+  launchAssist,
+  deleteAccount,
+  getExportAccountUrl,
+  importAccount,
 } from "../api"
 
 const loading = ref(false)
 const accounts = ref<any[]>([])
-const platformFilter = ref("")
+const platformFilter = ref("all")
+const searchQuery = ref("")
 const checkingAccountId = ref("")
+const isBatchChecking = ref(false)
+const fileInput = ref<HTMLInputElement | null>(null)
+const triggerFileSelect = () => {
+  fileInput.value?.click()
+}
+
+const platformTabs = [
+  { label: "全部平台", value: "all" },
+  { label: "小红书", value: "xiaohongshu" },
+  { label: "抖音", value: "douyin" },
+  { label: "快手", value: "kuaishou" },
+  { label: "视频号", value: "channels" },
+]
+
+const getPlatformCount = (val: string) => {
+  if (val === "all") return accounts.value.length
+  return accounts.value.filter(a => a.platform === val).length
+}
+
+const filteredAccounts = computed(() => {
+  return accounts.value.filter(acc => {
+    const matchPlatform = platformFilter.value === "all" || acc.platform === platformFilter.value
+    const query = searchQuery.value.trim().toLowerCase()
+    const matchSearch =
+      !query ||
+      (acc.account_name && acc.account_name.toLowerCase().includes(query)) ||
+      (acc.uid && String(acc.uid).toLowerCase().includes(query)) ||
+      (acc.group_name && acc.group_name.toLowerCase().includes(query))
+    return matchPlatform && matchSearch
+  })
+})
 
 const formatCount = (val: number | null | undefined) => {
   if (!val || val === 0) return "0"
@@ -263,7 +464,7 @@ const copyText = (text: string) => {
   })
 }
 
-// 登录模态框控制
+// 登录控制
 const loginDialogVisible = ref(false)
 const isLoggingIn = ref(false)
 const qrcodeBase64 = ref("")
@@ -271,81 +472,25 @@ const currentLoginAccountId = ref("")
 const loginForm = ref({
   platform: "xiaohongshu",
   group_name: "默认分组",
-  proxy_url: ""
+  proxy_url: "",
 })
 
-// 导入模态框控制
+// 导入控制
 const importDialogVisible = ref(false)
 const importing = ref(false)
-const selectedFile = ref<File | null>(null)
 const overwriteOnImport = ref(true)
+const selectedFile = ref<any>(null)
 
-// 辅助登录与状态自动同步轮询器
-let assistPollTimer: any = null
-
-const startAssistPolling = (accountId: string) => {
-  if (assistPollTimer) clearInterval(assistPollTimer)
-  let attempts = 0
-  assistPollTimer = setInterval(async () => {
-    attempts++
-    if (attempts > 90) { // 最多持续轮询 3 分钟
-      clearInterval(assistPollTimer)
-      assistPollTimer = null
-      return
-    }
-    try {
-      const res: any = await getAccounts({ platform: platformFilter.value || undefined })
-      if (res && res.data) {
-        accounts.value = res.data
-        const target = res.data.find((a: any) => a.id === accountId)
-        if (target && target.status === "active") {
-          ElMessage.success(`【${target.account_name}】授权状态已自动同步为有效！`)
-          clearInterval(assistPollTimer)
-          assistPollTimer = null
-          if (loginDialogVisible.value) {
-            closeLoginDialog()
-          }
-        }
-      }
-    } catch (e) {}
-  }, 2000)
-}
-
-// WebSocket 连接
 let ws: WebSocket | null = null
-
-const initWebSocket = () => {
-  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:"
-  const host = window.location.host
-  ws = new WebSocket(`${protocol}//${host}/ws`)
-
-  ws.onmessage = (event) => {
-    try {
-      const msg = JSON.parse(event.data)
-      if (msg.event === "qrcode_updated") {
-        if (msg.data.account_id === currentLoginAccountId.value) {
-          qrcodeBase64.value = msg.data.qrcode_base64
-        }
-      } else if (msg.event === "account_status_changed") {
-        loadAccounts()
-        if (msg.data.status === "active") {
-          if (loginDialogVisible.value && msg.data.id === currentLoginAccountId.value) {
-            ElMessage.success(`【${msg.data.account_name}】扫码授权成功！`)
-            closeLoginDialog()
-          }
-        }
-      }
-    } catch (e) {}
-  }
-}
+let assistPollTimer: any = null
 
 const loadAccounts = async () => {
   loading.value = true
   try {
-    const res: any = await getAccounts({ platform: platformFilter.value || undefined })
+    const res: any = await getAccounts()
     accounts.value = res.data || []
   } catch (e: any) {
-    ElMessage.error(e.message)
+    ElMessage.error(e.message || "加载账号列表失败")
   } finally {
     loading.value = false
   }
@@ -363,22 +508,18 @@ const closeLoginDialog = () => {
   isLoggingIn.value = false
   qrcodeBase64.value = ""
   currentLoginAccountId.value = ""
-  loadAccounts()
 }
 
 const handleStartLogin = async () => {
   isLoggingIn.value = true
   qrcodeBase64.value = ""
+  currentLoginAccountId.value = ""
   try {
     const res: any = await startLogin(loginForm.value)
     currentLoginAccountId.value = res.data.account_id
-    // 立即刷新列表保证新增的待授权账号即时可见
-    loadAccounts()
-    // 启动状态同步轮询
-    startAssistPolling(res.data.account_id)
   } catch (e: any) {
+    ElMessage.error(e.message || "初始化登录环境失败")
     isLoggingIn.value = false
-    ElMessage.error(e.message)
   }
 }
 
@@ -386,8 +527,7 @@ const handleAssistFromDialog = async () => {
   if (!currentLoginAccountId.value) return
   try {
     await launchAssist(currentLoginAccountId.value)
-    ElMessage.success("已在桌面呼出 Chrome 窗口，请在弹出的窗口中操作，完成后将自动同步！")
-    startAssistPolling(currentLoginAccountId.value)
+    ElMessage.success("已在后台为您拉起桌面 Chrome 窗口，请在弹出的浏览器中操作！")
   } catch (e: any) {
     ElMessage.error(e.message)
   }
@@ -400,7 +540,7 @@ const handleCheckHealth = async (acc: any) => {
     const res: any = await checkAccountHealth(acc.id)
     loadingMsg.close()
     if (res.data.status === "active") {
-      ElMessage.success(`【${acc.account_name}】登录有效，头像与互动统计数据已同步！`)
+      ElMessage.success(`【${acc.account_name}】登录有效，最新数据已同步！`)
     } else {
       ElMessage.warning(`【${acc.account_name}】登录态已过期，请重新登录`)
     }
@@ -413,37 +553,60 @@ const handleCheckHealth = async (acc: any) => {
   }
 }
 
+const handleBatchCheck = async () => {
+  if (accounts.value.length === 0) return
+  isBatchChecking.value = true
+  ElMessage.info("开始并发巡检全部账号会话与数据...")
+  try {
+    await Promise.all(accounts.value.map(a => checkAccountHealth(a.id)))
+    ElMessage.success("全部账号巡检完成！")
+    loadAccounts()
+  } catch (e) {
+    ElMessage.error("巡检过程中部分账号出现异常")
+  } finally {
+    isBatchChecking.value = false
+  }
+}
+
 const handleLaunchAssist = async (acc: any) => {
   try {
     await launchAssist(acc.id)
-    ElMessage.success("已在桌面弹出受控 Chrome 窗口，请在弹窗中滑动滑块或输入验证码！")
-    startAssistPolling(acc.id)
+    ElMessage.success(`已为您呼出【${acc.account_name}】的辅助 Chrome 窗口！`)
   } catch (e: any) {
     ElMessage.error(e.message)
   }
 }
 
 const handleExport = (acc: any) => {
-  window.open(getExportAccountUrl(acc.id), "_blank")
+  const url = getExportAccountUrl(acc.id)
+  window.open(url, "_blank")
 }
 
-const handleDelete = async (accountId: string) => {
+const confirmDelete = (acc: any) => {
+  ElMessageBox.confirm(`确定要删除账号【${acc.account_name}】及其本地独立隔离缓存吗？`, "删除确认", {
+    confirmButtonText: "确定删除",
+    cancelButtonText: "取消",
+    type: "warning",
+  }).then(() => {
+    handleDelete(acc.id)
+  }).catch(() => {})
+}
+
+const handleDelete = async (id: string) => {
   try {
-    await deleteAccount(accountId)
-    ElMessage.success("账号已删除")
+    await deleteAccount(id)
+    ElMessage.success("账号已成功删除")
     loadAccounts()
   } catch (e: any) {
     ElMessage.error(e.message)
   }
 }
 
-const openImportDialog = () => {
-  importDialogVisible.value = true
-  selectedFile.value = null
-}
-
-const handleFileChange = (file: any) => {
-  selectedFile.value = file.raw
+const handleFileSelected = (e: any) => {
+  const file = e.target.files?.[0]
+  if (file) {
+    selectedFile.value = file
+  }
 }
 
 const submitImport = async () => {
@@ -458,6 +621,7 @@ const submitImport = async () => {
     const res: any = await importAccount(formData, overwriteOnImport.value)
     ElMessage.success(`成功导入 ${res.data.imported_count} 个账号！`)
     importDialogVisible.value = false
+    selectedFile.value = null
     loadAccounts()
   } catch (e: any) {
     ElMessage.error(e.message)
@@ -471,19 +635,56 @@ const getPlatformLabel = (platform: string) => {
     xiaohongshu: "小红书",
     douyin: "抖音",
     kuaishou: "快手",
-    channels: "视频号"
+    channels: "视频号",
   }
   return map[platform] || platform
 }
 
-const getPlatformTagType = (platform: string) => {
-  const map: Record<string, any> = {
-    xiaohongshu: "danger",
-    douyin: "primary",
-    kuaishou: "warning",
-    channels: "success"
+const getPlatformShort = (platform: string) => {
+  const map: Record<string, string> = {
+    xiaohongshu: "红",
+    douyin: "抖",
+    kuaishou: "快",
+    channels: "视",
   }
-  return map[platform] || "info"
+  return map[platform] || "号"
+}
+
+const getPlatformBadgeColor = (platform: string) => {
+  const map: Record<string, string> = {
+    xiaohongshu: "bg-red-500",
+    douyin: "bg-slate-900",
+    kuaishou: "bg-amber-500",
+    channels: "bg-emerald-600",
+  }
+  return map[platform] || "bg-blue-600"
+}
+
+const initWebSocket = () => {
+  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:"
+  const host = window.location.host
+  ws = new WebSocket(`${protocol}//${host}/ws`)
+
+  ws.onmessage = (event) => {
+    try {
+      const msg = JSON.parse(event.data)
+      if (msg.event === "login_qrcode") {
+        qrcodeBase64.value = msg.data.qrcode
+      } else if (msg.event === "login_success") {
+        ElMessage.success(`账号【${msg.data.account_name}】登录授权成功！`)
+        loginDialogVisible.value = false
+        isLoggingIn.value = false
+        loadAccounts()
+      } else if (msg.event === "login_failed") {
+        ElMessage.error(`登录失败: ${msg.data.error || "未知异常"}`)
+        isLoggingIn.value = false
+      }
+    } catch (e) {}
+  }
+
+  ws.onclose = () => {
+    setTimeout(initWebSocket, 3000)
+  }
 }
 
 onMounted(() => {
@@ -499,193 +700,3 @@ onUnmounted(() => {
   }
 })
 </script>
-
-<style scoped>
-.accounts-container { padding: 10px 0; }
-.account-card {
-  border-radius: 10px;
-  border: 1px solid #e2e8f0;
-  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-  margin-bottom: 16px;
-}
-.account-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
-}
-
-/* 头部行 */
-.card-header-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 12px;
-}
-.account-profile {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-width: 0;
-  flex: 1;
-}
-.account-avatar {
-  flex-shrink: 0;
-  border: 1px solid #e2e8f0;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
-}
-.account-titles {
-  min-width: 0;
-  flex: 1;
-}
-.account-name-line {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-.account-name {
-  font-size: 15px;
-  font-weight: 700;
-  color: #0f172a;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.account-group-line {
-  margin-top: 4px;
-}
-.group-tag {
-  display: inline-block;
-  background-color: #f1f5f9;
-  color: #475569;
-  font-size: 11px;
-  padding: 1px 6px;
-  border-radius: 4px;
-}
-.status-badge-wrap {
-  flex-shrink: 0;
-  margin-left: 8px;
-}
-
-/* UID 识别条 */
-.uid-strip {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  background-color: #f8fafc;
-  border: 1px solid #edf2f7;
-  border-radius: 6px;
-  padding: 6px 10px;
-  margin-bottom: 12px;
-}
-.uid-content {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  flex: 1;
-}
-.uid-prefix {
-  color: #94a3b8;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 11px;
-  font-weight: 600;
-  flex-shrink: 0;
-}
-.uid-text {
-  color: #334155;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 12px;
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  user-select: all;
-}
-.copy-btn {
-  margin-left: 8px;
-  padding: 0 !important;
-  font-size: 12px;
-  flex-shrink: 0;
-}
-
-/* 核心数据指标横幅 (粉丝/点赞/关注) */
-.stats-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-around;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-  padding: 12px 6px;
-  margin-bottom: 12px;
-}
-.stat-col {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-}
-.stat-divider {
-  width: 1px;
-  height: 28px;
-  background-color: #e2e8f0;
-}
-.stat-number {
-  font-size: 17px;
-  font-weight: 700;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  line-height: 1.2;
-}
-.stat-number.text-followers {
-  color: #0f172a;
-}
-.stat-number.text-likes {
-  color: #e11d48;
-}
-.stat-number.text-following {
-  color: #334155;
-}
-.stat-title {
-  font-size: 11px;
-  color: #64748b;
-  margin-top: 4px;
-  font-weight: 500;
-}
-
-/* 底部与元信息 */
-.account-meta {
-  font-size: 11px;
-  color: #94a3b8;
-  margin-bottom: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.text-loading {
-  color: #3b82f6;
-  font-weight: 500;
-}
-.card-footer {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  border-top: 1px solid #f1f5f9;
-  padding-top: 12px;
-}
-.action-btns {
-  display: flex;
-  gap: 6px;
-}
-
-/* 通用与弹窗样式 */
-.mb-4 { margin-bottom: 16px; }
-.mr-1 { margin-right: 4px; }
-.flex { display: flex; }
-.items-center { align-items: center; }
-.gap-2 { gap: 8px; }
-.gap-4 { gap: 16px; }
-.text-xs { font-size: 12px; }
-.qrcode-wrapper { min-height: 240px; }
-</style>

@@ -1,334 +1,537 @@
 <template>
-  <div class="tasklist-container">
-    <el-card shadow="never" class="mb-4">
-      <div class="flex justify-between items-center">
-        <div class="flex items-center gap-4">
-          <span class="font-bold text-lg">任务调度看板</span>
-          <el-radio-group v-model="statusFilter" size="small" @change="loadTasks">
-            <el-radio-button label="">全部状态</el-radio-button>
-            <el-radio-button label="processing">执行中</el-radio-button>
-            <el-radio-button label="completed">已完成</el-radio-button>
-            <el-radio-button label="failed">失败</el-radio-button>
-          </el-radio-group>
-        </div>
-        <div class="flex gap-2">
-          <el-popconfirm 
-            title="确定要清理所有失败的任务与失败子作品吗？" 
-            @confirm="handleClearFailedTasks"
-          >
-            <template #reference>
-              <el-button type="danger" plain :disabled="!hasFailedTasks">
-                <el-icon class="mr-1"><Delete /></el-icon> 清理失败任务
-              </el-button>
-            </template>
-          </el-popconfirm>
-          <el-button @click="loadTasks">
-            <el-icon class="mr-1"><Refresh /></el-icon> 刷新
-          </el-button>
-          <el-button type="info" @click="openGlobalLogDrawer">
-            <el-icon class="mr-1"><Document /></el-icon> 实时运行日志
-          </el-button>
-        </div>
-      </div>
-    </el-card>
+  <div class="space-y-6 max-w-7xl mx-auto pb-16">
+    <!-- 顶栏：标题与操作看板 -->
+    <Card class="border-border/60 bg-gradient-to-r from-card via-card to-primary/[0.03] shadow-sm">
+      <CardContent class="p-6">
+        <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div class="space-y-1">
+            <div class="flex items-center gap-2.5">
+              <div class="p-2 rounded-lg bg-primary/10 text-primary">
+                <ListChecks class="w-5 h-5" />
+              </div>
+              <div>
+                <h1 class="text-xl font-bold tracking-tight text-foreground">任务调度看板</h1>
+                <p class="text-xs text-muted-foreground">
+                  全流程监控多平台矩阵分发进度、调度排期队列与原生/本地定时执行
+                </p>
+              </div>
+            </div>
+          </div>
 
-    <!-- 任务主列表 -->
-    <el-card shadow="never">
-      <el-table :data="tasks" v-loading="loading" style="width: 100%" row-key="id">
-        <!-- 展开列：展示具体的每个账号子任务 -->
-        <el-table-column type="expand">
-          <template #default="{ row }">
-            <div class="p-4 bg-slate-50 rounded">
-              <div class="font-bold text-sm mb-2 text-gray-700">子作品执行明细：</div>
-              <el-table :data="row.subtasks || []" size="small" border>
-                <el-table-column prop="account_name" label="目标账号" width="160">
-                  <template #default="{ row: sub }">
-                    <div class="flex items-center gap-1">
-                      <span>{{ sub.account_name }}</span>
-                      <el-tag size="small" :type="sub.platform === 'xiaohongshu' ? 'danger' : 'primary'">
+          <div class="flex flex-wrap items-center gap-2">
+            <!-- 状态快速筛选 Pill 组 -->
+            <div class="flex items-center gap-1 bg-muted/60 p-1 rounded-xl border border-border/80 text-xs">
+              <button
+                v-for="st in [
+                  { label: '全部状态', value: '' },
+                  { label: '执行中', value: 'processing' },
+                  { label: '已完成', value: 'completed' },
+                  { label: '失败', value: 'failed' }
+                ]"
+                :key="st.value"
+                type="button"
+                :class="[
+                  'px-3 py-1 font-medium rounded-lg transition-all',
+                  statusFilter === st.value
+                    ? 'bg-background text-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
+                ]"
+                @click="statusFilter = st.value; loadTasks()"
+              >
+                {{ st.label }}
+              </button>
+            </div>
+
+            <!-- 操作按钮组 -->
+            <Button
+              v-if="hasFailedTasks"
+              variant="destructive"
+              size="sm"
+              class="h-8 text-xs"
+              @click="confirmClearFailedTasks"
+            >
+              <Trash2 class="w-3.5 h-3.5 mr-1" /> 清理失败任务
+            </Button>
+
+            <Button
+              variant="outline"
+              size="sm"
+              class="h-8 text-xs"
+              :disabled="loading"
+              @click="loadTasks"
+            >
+              <RefreshCw :class="['w-3.5 h-3.5 mr-1', loading ? 'animate-spin' : '']" /> 刷新
+            </Button>
+
+            <Button
+              variant="secondary"
+              size="sm"
+              class="h-8 text-xs"
+              @click="openGlobalLogDrawer"
+            >
+              <Terminal class="w-3.5 h-3.5 mr-1" /> 运行日志
+            </Button>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+
+    <!-- 任务列表容器 -->
+    <div v-if="loading && tasks.length === 0" class="py-20 text-center text-muted-foreground">
+      <RefreshCw class="w-8 h-8 mx-auto mb-2 animate-spin text-primary opacity-60" />
+      <p class="text-sm">正在加载任务调度看板数据...</p>
+    </div>
+
+    <div v-else-if="tasks.length === 0" class="py-20 text-center bg-card border border-border/60 rounded-2xl shadow-sm">
+      <ListChecks class="w-12 h-12 mx-auto mb-3 text-muted-foreground/40" />
+      <h3 class="text-base font-bold text-foreground">暂无矩阵分发任务</h3>
+      <p class="text-xs text-muted-foreground mt-1 max-w-sm mx-auto">
+        当前还没有创建任何分发任务，你可以前往【创建分发任务】发布第一批作品
+      </p>
+      <div class="mt-4">
+        <router-link to="/publish">
+          <Button size="sm">
+            <Plus class="w-4 h-4 mr-1.5" /> 立即创建新任务
+          </Button>
+        </router-link>
+      </div>
+    </div>
+
+    <!-- 任务卡片/表格 -->
+    <div v-else class="space-y-3">
+      <Card
+        v-for="task in tasks"
+        :key="task.id"
+        class="border-border/70 shadow-sm overflow-hidden transition-all hover:border-border"
+      >
+        <!-- 主任务条目 Header -->
+        <div class="p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-card">
+          <div class="flex items-start gap-3.5 min-w-0">
+            <!-- 展开/折叠按钮 -->
+            <button
+              type="button"
+              class="mt-0.5 p-1.5 rounded-lg border border-border/80 bg-muted/40 hover:bg-muted text-muted-foreground hover:text-foreground transition flex-shrink-0"
+              @click="toggleExpand(task.id)"
+              :title="isExpanded(task.id) ? '折叠子作品明细' : '展开子作品明细'"
+            >
+              <ChevronDown :class="['w-4 h-4 transition-transform duration-200', isExpanded(task.id) ? 'rotate-180' : '']" />
+            </button>
+
+            <!-- 任务名称与关键标签 -->
+            <div class="space-y-1.5 min-w-0">
+              <div class="flex items-center gap-2.5 flex-wrap">
+                <span class="font-bold text-foreground text-sm tracking-tight truncate max-w-md" :title="task.name">
+                  {{ task.name }}
+                </span>
+                <Badge
+                  :variant="task.task_type === 'one_to_many' ? 'matrix' : 'secondary'"
+                  class="text-[10px] px-1.5 py-0 h-5"
+                >
+                  {{ task.task_type === 'one_to_many' ? '1对多广播' : '多对多匹配' }}
+                </Badge>
+                <Badge :variant="getStatusBadgeVariant(task.status)" class="text-[10px] px-2 py-0 h-5 font-semibold">
+                  {{ getStatusText(task.status) }}
+                </Badge>
+              </div>
+
+              <!-- 统计与时间描述 -->
+              <div class="flex items-center gap-3 text-xs text-muted-foreground flex-wrap">
+                <span>总计 <strong class="text-foreground">{{ task.total_count }}</strong> 个子作品</span>
+                <span class="text-border">•</span>
+                <span class="text-emerald-600 font-medium">成功 {{ task.success_count }}</span>
+                <span class="text-border">•</span>
+                <span :class="task.fail_count > 0 ? 'text-destructive font-medium' : 'text-muted-foreground'">
+                  失败 {{ task.fail_count }}
+                </span>
+                <span class="text-border">•</span>
+                <span class="text-[11px] font-mono text-muted-foreground/80">
+                  {{ formatTime(task.created_at) }}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 右侧：进度条与操作按钮 -->
+          <div class="flex items-center gap-4 flex-shrink-0 justify-between lg:justify-end border-t lg:border-t-0 pt-3 lg:pt-0 border-border/50">
+            <!-- 进度条 -->
+            <div class="w-36 space-y-1">
+              <div class="flex items-center justify-between text-[11px]">
+                <span class="text-muted-foreground">执行进度</span>
+                <span class="font-semibold text-foreground font-mono">{{ calcProgress(task) }}%</span>
+              </div>
+              <Progress :model-value="calcProgress(task)" class="h-2" />
+            </div>
+
+            <!-- 操作按钮组 -->
+            <div class="flex items-center gap-1.5">
+              <Button
+                variant="ghost"
+                size="sm"
+                class="h-8 px-2.5 text-xs text-muted-foreground hover:text-foreground"
+                @click="openTaskLogDrawer(task)"
+              >
+                <Terminal class="w-3.5 h-3.5 mr-1 text-primary" /> 日志
+              </Button>
+
+              <Button
+                v-if="task.fail_count > 0"
+                variant="outline"
+                size="sm"
+                class="h-8 px-2.5 text-xs text-amber-600 hover:text-amber-700 border-amber-500/30 bg-amber-50/50 dark:bg-amber-950/20"
+                @click="handleRetry(task.id)"
+              >
+                <RefreshCw class="w-3.5 h-3.5 mr-1" /> 重试失败
+              </Button>
+
+              <Button
+                v-if="task.status === 'processing' || task.status === 'pending' || task.status === 'partial_failed'"
+                variant="ghost"
+                size="sm"
+                class="h-8 px-2.5 text-xs text-destructive hover:bg-destructive/10"
+                @click="confirmCancelTask(task.id)"
+              >
+                <Ban class="w-3.5 h-3.5 mr-1" /> 取消
+              </Button>
+
+              <Button
+                variant="ghost"
+                size="sm"
+                class="h-8 px-2 text-xs text-muted-foreground hover:text-destructive"
+                @click="confirmDeleteTask(task.id)"
+                title="删除任务记录"
+              >
+                <Trash2 class="w-3.5 h-3.5" />
+              </Button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 展开后：各账号子任务明细表格 -->
+        <div v-if="isExpanded(task.id)" class="border-t border-border/60 bg-muted/20 p-4">
+          <div class="flex items-center justify-between mb-2.5">
+            <span class="text-xs font-bold text-foreground flex items-center gap-1.5">
+              <Layers class="w-3.5 h-3.5 text-primary" /> 子作品执行明细 ({{ task.subtasks?.length || 0 }} 个目标账号)
+            </span>
+            <span class="text-[11px] text-muted-foreground">
+              各平台原生定时任务将在云端按时公开，本地定时需保持后台运行
+            </span>
+          </div>
+
+          <div class="border border-border/70 rounded-xl overflow-hidden bg-card shadow-sm">
+            <Table>
+              <TableHeader>
+                <TableRow class="bg-muted/40 text-xs">
+                  <TableHead class="text-xs font-semibold w-40">目标账号</TableHead>
+                  <TableHead class="text-xs font-semibold min-w-[180px]">作品标题</TableHead>
+                  <TableHead class="text-xs font-semibold w-28 text-center">调度方式</TableHead>
+                  <TableHead class="text-xs font-semibold w-36 text-center">预约公开时间</TableHead>
+                  <TableHead class="text-xs font-semibold w-24 text-center">状态</TableHead>
+                  <TableHead class="text-xs font-semibold min-w-[150px]">执行反馈</TableHead>
+                  <TableHead class="text-xs font-semibold w-40 text-center">操作</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                <TableRow
+                  v-for="sub in task.subtasks || []"
+                  :key="sub.id"
+                  class="text-xs hover:bg-muted/30"
+                >
+                  <!-- 目标账号 -->
+                  <TableCell>
+                    <div class="flex items-center gap-2">
+                      <Badge
+                        :variant="sub.platform === 'xiaohongshu' ? 'xiaohongshu' : 'douyin'"
+                        class="text-[9px] px-1 py-0 h-4 uppercase font-semibold flex-shrink-0"
+                      >
                         {{ sub.platform === 'xiaohongshu' ? '小红书' : '抖音' }}
-                      </el-tag>
+                      </Badge>
+                      <span class="font-medium text-foreground truncate max-w-[100px]" :title="sub.account_name">
+                        {{ sub.account_name }}
+                      </span>
                     </div>
-                  </template>
-                </el-table-column>
-                <el-table-column prop="title" label="作品标题" min-width="200" show-overflow-tooltip />
-                <el-table-column prop="schedule_mode" label="调度方式" width="130" align="center">
-                  <template #default="{ row: sub }">
-                    <el-tag v-if="sub.schedule_mode === 'immediate'" size="small" type="info">立即错峰</el-tag>
-                    <el-tag v-else-if="sub.schedule_mode === 'platform_native'" size="small" type="success">平台原生定时</el-tag>
-                    <el-tag v-else size="small" type="warning">本地定时</el-tag>
-                  </template>
-                </el-table-column>
-                <el-table-column label="预约时间" width="160" align="center">
-                  <template #default="{ row: sub }">
-                    {{ sub.scheduled_at ? sub.scheduled_at.slice(0, 16).replace('T', ' ') : '-' }}
-                  </template>
-                </el-table-column>
-                <el-table-column prop="status" label="状态" width="110" align="center">
-                  <template #default="{ row: sub }">
-                    <el-tag v-if="sub.status === 'published'" type="success" size="small">已发布</el-tag>
-                    <el-tag v-else-if="sub.status === 'uploading'" type="primary" size="small">上传中</el-tag>
-                    <el-tag v-else-if="sub.status === 'failed'" type="danger" size="small">发布失败</el-tag>
-                    <el-tag v-else-if="sub.status === 'cancelled'" type="info" size="small">已取消</el-tag>
-                    <el-tag v-else type="info" size="small">排队中</el-tag>
-                  </template>
-                </el-table-column>
-                <el-table-column prop="error_message" label="执行提示" min-width="180">
-                  <template #default="{ row: sub }">
-                    <span v-if="sub.error_message" class="text-xs text-red-500">{{ sub.error_message }}</span>
-                    <span v-else class="text-gray-400">-</span>
-                  </template>
-                </el-table-column>
-                <!-- 子任务操作栏：发布成功前允许取消与编辑，失败或已取消时支持删除 -->
-                <el-table-column label="操作" width="230" align="center">
-                  <template #default="{ row: sub }">
+                  </TableCell>
+
+                  <!-- 标题 -->
+                  <TableCell class="font-medium truncate max-w-xs" :title="sub.title">
+                    {{ sub.title }}
+                  </TableCell>
+
+                  <!-- 调度方式 -->
+                  <TableCell class="text-center">
+                    <Badge v-if="sub.schedule_mode === 'immediate'" variant="secondary" class="text-[10px] px-1.5 py-0 h-4">
+                      立即错峰
+                    </Badge>
+                    <Badge v-else-if="sub.schedule_mode === 'platform_native'" variant="success" class="text-[10px] px-1.5 py-0 h-4">
+                      平台原生
+                    </Badge>
+                    <Badge v-else variant="warning" class="text-[10px] px-1.5 py-0 h-4">
+                      本地定时
+                    </Badge>
+                  </TableCell>
+
+                  <!-- 预约公开时间 -->
+                  <TableCell class="text-center font-mono text-[11px] text-muted-foreground">
+                    {{ sub.scheduled_at ? formatTime(sub.scheduled_at) : '-' }}
+                  </TableCell>
+
+                  <!-- 状态 -->
+                  <TableCell class="text-center">
+                    <Badge :variant="getSubtaskStatusBadgeVariant(sub.status)" class="text-[10px] px-1.5 py-0 h-4 font-semibold">
+                      {{ getSubtaskStatusText(sub.status) }}
+                    </Badge>
+                  </TableCell>
+
+                  <!-- 执行反馈 -->
+                  <TableCell>
+                    <span v-if="sub.error_message" class="text-[11px] text-destructive font-medium line-clamp-1" :title="sub.error_message">
+                      {{ sub.error_message }}
+                    </span>
+                    <span v-else class="text-muted-foreground/60 text-xs">-</span>
+                  </TableCell>
+
+                  <!-- 操作 -->
+                  <TableCell class="text-center">
                     <div class="flex items-center justify-center gap-1">
-                      <el-button size="small" type="info" link @click="openTaskLogDrawer(row, sub)">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        class="h-7 px-2 text-[11px] text-muted-foreground hover:text-foreground"
+                        @click="openTaskLogDrawer(task, sub)"
+                      >
                         日志
-                      </el-button>
-                      <el-button 
-                        v-if="sub.status !== 'published'" 
-                        size="small" 
-                        type="primary" 
-                        link 
+                      </Button>
+
+                      <Button
+                        v-if="sub.status !== 'published'"
+                        variant="ghost"
+                        size="sm"
+                        class="h-7 px-2 text-[11px] text-primary hover:text-primary"
                         @click="openEditSubtaskDialog(sub)"
                       >
                         编辑
-                      </el-button>
-                      <el-popconfirm 
-                        v-if="sub.status !== 'published' && sub.status !== 'cancelled'" 
-                        title="确定要取消该子任务吗？" 
-                        @confirm="handleCancelSubtask(sub.id)"
+                      </Button>
+
+                      <Button
+                        v-if="sub.status !== 'published' && sub.status !== 'cancelled'"
+                        variant="ghost"
+                        size="sm"
+                        class="h-7 px-2 text-[11px] text-destructive hover:bg-destructive/10"
+                        @click="handleCancelSubtask(sub.id)"
                       >
-                        <template #reference>
-                          <el-button size="small" type="danger" link>取消</el-button>
-                        </template>
-                      </el-popconfirm>
-                      <el-button 
-                        v-if="sub.status === 'failed'" 
-                        size="small" 
-                        type="warning" 
-                        link 
+                        取消
+                      </Button>
+
+                      <Button
+                        v-if="sub.status === 'failed'"
+                        variant="ghost"
+                        size="sm"
+                        class="h-7 px-2 text-[11px] text-amber-600 hover:text-amber-700"
                         @click="handleRetrySubtask(sub.id)"
                       >
                         重试
-                      </el-button>
-                      <el-popconfirm 
-                        v-if="sub.status === 'failed' || sub.status === 'cancelled'" 
-                        title="确定要删除该子作品记录吗？" 
-                        @confirm="handleDeleteSubtask(sub.id)"
+                      </Button>
+
+                      <Button
+                        v-if="sub.status === 'failed' || sub.status === 'cancelled'"
+                        variant="ghost"
+                        size="sm"
+                        class="h-7 px-1.5 text-[11px] text-muted-foreground hover:text-destructive"
+                        @click="handleDeleteSubtask(sub.id)"
                       >
-                        <template #reference>
-                          <el-button size="small" type="danger" link>删除</el-button>
-                        </template>
-                      </el-popconfirm>
-                      <span v-if="sub.status === 'published'" class="text-xs text-green-600 font-medium">已完成</span>
+                        <Trash2 class="w-3 h-3" />
+                      </Button>
+
+                      <span v-if="sub.status === 'published'" class="text-[11px] text-emerald-600 font-medium px-1">
+                        已完成
+                      </span>
                     </div>
-                  </template>
-                </el-table-column>
-              </el-table>
-            </div>
-          </template>
-        </el-table-column>
-
-        <el-table-column prop="name" label="任务名称" min-width="200" />
-        <el-table-column prop="task_type" label="模式" width="120">
-          <template #default="{ row }">
-            <el-tag size="small" :type="row.task_type === 'one_to_many' ? 'info' : 'warning'">
-              {{ row.task_type === 'one_to_many' ? '1对多' : '多对多' }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="total_count" label="子任务总数" width="110" align="center" />
-        <el-table-column prop="success_count" label="成功数" width="90" align="center">
-          <template #default="{ row }">
-            <span class="text-green-600 font-bold">{{ row.success_count }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="fail_count" label="失败数" width="90" align="center">
-          <template #default="{ row }">
-            <span :class="row.fail_count > 0 ? 'text-red-500 font-bold' : ''">{{ row.fail_count }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="进度" width="160">
-          <template #default="{ row }">
-            <el-progress 
-              :percentage="row.total_count ? Math.round(((row.success_count + row.fail_count) / row.total_count) * 100) : 0" 
-              :status="row.status === 'completed' ? 'success' : row.status === 'failed' ? 'exception' : ''"
-            />
-          </template>
-        </el-table-column>
-        <el-table-column prop="status" label="主状态" width="120" align="center">
-          <template #default="{ row }">
-            <el-tag v-if="row.status === 'completed'" type="success">已完成</el-tag>
-            <el-tag v-else-if="row.status === 'processing'" type="primary">执行中</el-tag>
-            <el-tag v-else-if="row.status === 'partial_failed'" type="warning">部分失败</el-tag>
-            <el-tag v-else-if="row.status === 'failed'" type="danger">失败</el-tag>
-            <el-tag v-else-if="row.status === 'cancelled'" type="info">已取消</el-tag>
-            <el-tag v-else type="info">待排期</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="created_at" label="创建时间" width="180">
-          <template #default="{ row }">
-            {{ row.created_at ? row.created_at.slice(0, 19).replace('T', ' ') : '-' }}
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="220" align="center">
-          <template #default="{ row }">
-            <div class="flex items-center justify-center gap-1">
-              <el-button size="small" type="primary" link @click="openTaskLogDrawer(row)">
-                日志
-              </el-button>
-              <el-button v-if="row.fail_count > 0" size="small" type="warning" link @click="handleRetry(row.id)">
-                重试失败
-              </el-button>
-              <el-popconfirm 
-                v-if="row.status === 'processing' || row.status === 'pending' || row.status === 'partial_failed'" 
-                title="确定要取消该任务所有未发布的子任务吗？" 
-                @confirm="handleCancelTask(row.id)"
-              >
-                <template #reference>
-                  <el-button size="small" type="danger" link>取消任务</el-button>
-                </template>
-              </el-popconfirm>
-              <el-popconfirm title="确定要删除此任务记录吗？" @confirm="handleDeleteTask(row.id)">
-                <template #reference>
-                  <el-button size="small" type="info" link>删除</el-button>
-                </template>
-              </el-popconfirm>
-            </div>
-          </template>
-        </el-table-column>
-      </el-table>
-    </el-card>
-
-    <!-- 编辑子任务模态框 -->
-    <el-dialog v-model="editDialogVisible" title="编辑子作品发布配置" width="560px">
-      <el-form :model="editForm" label-width="110px">
-        <el-form-item label="目标账号">
-          <el-tag :type="editingSubtask?.platform === 'xiaohongshu' ? 'danger' : 'primary'">
-            {{ editingSubtask?.platform === 'xiaohongshu' ? '小红书' : '抖音' }} ({{ editingSubtask?.account_name }})
-          </el-tag>
-        </el-form-item>
-        <el-form-item label="作品标题" required>
-          <el-input v-model="editForm.title" placeholder="作品标题 (小红书限20字以内)" />
-        </el-form-item>
-        <el-form-item label="正文描述">
-          <el-input v-model="editForm.description" type="textarea" :rows="3" placeholder="作品正文描述..." />
-        </el-form-item>
-        <el-form-item label="话题标签">
-          <el-select 
-            v-model="editForm.tags" 
-            multiple 
-            filterable 
-            allow-create 
-            default-first-option 
-            placeholder="输入标签后回车" 
-            style="width: 100%"
-          />
-        </el-form-item>
-        <el-form-item v-if="editingSubtask?.schedule_mode !== 'immediate'" label="预约发布时间">
-          <el-date-picker
-            v-model="editForm.scheduled_at"
-            type="datetime"
-            placeholder="选择预约公开时间"
-            format="YYYY-MM-DD HH:mm"
-            value-format="YYYY-MM-DDTHH:mm:ss"
-          />
-        </el-form-item>
-        <el-form-item label="独立封面图">
-          <el-input v-model="editForm.cover_path" placeholder="可选图片绝对路径" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="editDialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="savingEdit" @click="submitEditSubtask">保存修改</el-button>
-      </template>
-    </el-dialog>
-
-    <!-- 任务执行与持久化日志抽屉 -->
-    <el-drawer 
-      v-model="showLogDrawer" 
-      size="50%"
-      destroy-on-close
-    >
-      <template #header>
-        <div class="flex items-center justify-between w-full pr-4">
-          <div class="flex items-center gap-2">
-            <el-icon :size="18"><Document /></el-icon>
-            <span class="font-bold text-base text-slate-800">{{ drawerTitle }}</span>
-            <el-tag v-if="selectedTask" size="small" type="success" effect="light">
-              SQLite 数据库持久化
-            </el-tag>
+                  </TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
           </div>
-          <div class="flex items-center gap-2">
-            <el-select 
-              v-model="logLevelFilter" 
-              size="small" 
-              placeholder="日志等级" 
-              style="width: 105px;"
+        </div>
+      </Card>
+    </div>
+
+    <!-- 编辑子任务模态框 (Dialog) -->
+    <Dialog :open="editDialogVisible" @update:open="val => editDialogVisible = val">
+      <DialogContent class="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle class="text-base font-bold flex items-center gap-2">
+            <Edit class="w-4 h-4 text-primary" /> 编辑子作品发布配置
+          </DialogTitle>
+          <DialogDescription class="text-xs">
+            修改即将分发到该账号的独立标题、描述文案或预约时间
+          </DialogDescription>
+        </DialogHeader>
+
+        <div class="space-y-4 py-2">
+          <div class="flex items-center gap-2 p-2.5 rounded-lg bg-muted/40 border border-border/60">
+            <Badge
+              :variant="editingSubtask?.platform === 'xiaohongshu' ? 'xiaohongshu' : 'douyin'"
+              class="text-[9px] px-1 py-0 h-4 uppercase font-semibold"
             >
-              <el-option label="全部等级" value="" />
-              <el-option label="SUCCESS" value="SUCCESS" />
-              <el-option label="ERROR" value="ERROR" />
-              <el-option label="WARNING" value="WARNING" />
-              <el-option label="INFO" value="INFO" />
-            </el-select>
-            <el-button size="small" @click="handleRefreshLogs" :loading="loadingTaskLogs">
-              <el-icon><Refresh /></el-icon>
-            </el-button>
-            <el-button size="small" @click="copyAllLogs">
-              复制日志
-            </el-button>
+              {{ editingSubtask?.platform === 'xiaohongshu' ? '小红书' : '抖音' }}
+            </Badge>
+            <span class="text-xs font-semibold text-foreground">{{ editingSubtask?.account_name }}</span>
+          </div>
+
+          <div class="space-y-1.5">
+            <div class="flex items-center justify-between">
+              <label class="text-xs font-semibold text-foreground">作品标题 <span class="text-destructive">*</span></label>
+              <span class="text-[11px] text-muted-foreground font-mono">
+                {{ editForm.title.length }}/{{ editingSubtask?.platform === 'xiaohongshu' ? 20 : 100 }}
+              </span>
+            </div>
+            <Input
+              v-model="editForm.title"
+              :maxlength="editingSubtask?.platform === 'xiaohongshu' ? 20 : 100"
+              placeholder="作品标题"
+            />
+          </div>
+
+          <div class="space-y-1.5">
+            <label class="text-xs font-semibold text-foreground">正文描述</label>
+            <Textarea v-model="editForm.description" rows="3" placeholder="作品正文描述..." />
+          </div>
+
+          <div v-if="editingSubtask?.schedule_mode !== 'immediate'" class="space-y-1.5">
+            <label class="text-xs font-semibold text-foreground">预约发布时间</label>
+            <Input type="datetime-local" v-model="editForm.scheduled_at" />
+          </div>
+
+          <div class="space-y-1.5">
+            <label class="text-xs font-semibold text-foreground">独立封面图</label>
+            <Input v-model="editForm.cover_path" placeholder="可选图片绝对路径 (留空平台截取)" />
           </div>
         </div>
-      </template>
 
-      <!-- 子任务快速切换栏（仅当选择主任务且有子任务时） -->
-      <div v-if="selectedTask && selectedTask.subtasks && selectedTask.subtasks.length > 1" class="mb-3 flex items-center gap-2 flex-wrap bg-slate-100 p-2 rounded">
-        <span class="text-xs text-slate-500">过滤子账号:</span>
-        <el-tag 
-          size="small" 
-          :effect="!selectedSubtask ? 'dark' : 'plain'"
-          class="cursor-pointer"
-          @click="selectSubtaskFilter(null)"
-        >
-          全部账号 ({{ selectedTask.subtasks.length }})
-        </el-tag>
-        <el-tag 
-          v-for="sub in selectedTask.subtasks" 
-          :key="sub.id"
-          size="small"
-          :effect="selectedSubtask?.id === sub.id ? 'dark' : 'plain'"
-          :type="sub.platform === 'xiaohongshu' ? 'danger' : 'primary'"
-          class="cursor-pointer"
-          @click="selectSubtaskFilter(sub)"
-        >
-          {{ sub.account_name }}
-        </el-tag>
-      </div>
+        <DialogFooter>
+          <Button variant="outline" size="sm" @click="editDialogVisible = false">取消</Button>
+          <Button variant="default" size="sm" :disabled="savingEdit" @click="submitEditSubtask">
+            {{ savingEdit ? "保存中..." : "保存修改" }}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
 
-      <div class="log-terminal bg-slate-900 text-slate-100 p-4 rounded font-mono text-xs overflow-y-auto">
-        <div v-if="displayedLogs.length === 0" class="text-slate-500 py-12 text-center">
-          <el-icon :size="24" class="mb-2"><Document /></el-icon>
-          <div>{{ loadingTaskLogs ? '正在读取数据库历史持久化日志...' : '暂无符合条件的日志记录' }}</div>
+    <!-- 运行与持久化日志抽屉 (Sheet) -->
+    <Sheet :open="showLogDrawer" @update:open="val => showLogDrawer = val">
+      <SheetContent class="w-full sm:max-w-2xl flex flex-col p-0 gap-0">
+        <!-- Sheet Header -->
+        <div class="p-5 border-b border-border/70 flex items-center justify-between bg-card">
+          <div class="space-y-1">
+            <div class="flex items-center gap-2">
+              <Terminal class="w-4 h-4 text-primary" />
+              <h2 class="text-sm font-bold text-foreground leading-none">{{ drawerTitle }}</h2>
+              <Badge v-if="selectedTask" variant="success" class="text-[9px] px-1.5 py-0 h-4">
+                SQLite 持久化
+              </Badge>
+            </div>
+            <p class="text-[11px] text-muted-foreground">
+              实时记录 Playwright 驱动、页面导航与矩阵平台接口交互日志
+            </p>
+          </div>
+
+          <div class="flex items-center gap-2 pr-6">
+            <!-- 等级筛选 -->
+            <select
+              v-model="logLevelFilter"
+              class="h-7 text-xs bg-background border border-border rounded-md px-2 text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+            >
+              <option value="">全部等级</option>
+              <option value="SUCCESS">SUCCESS</option>
+              <option value="ERROR">ERROR</option>
+              <option value="WARNING">WARNING</option>
+              <option value="INFO">INFO</option>
+            </select>
+
+            <Button variant="outline" size="sm" class="h-7 px-2 text-xs" :disabled="loadingTaskLogs" @click="handleRefreshLogs">
+              <RefreshCw :class="['w-3 h-3', loadingTaskLogs ? 'animate-spin' : '']" />
+            </Button>
+            <Button variant="secondary" size="sm" class="h-7 px-2 text-xs" @click="copyAllLogs">
+              <Copy class="w-3 h-3 mr-1" /> 复制
+            </Button>
+          </div>
         </div>
-        <div v-for="(log, idx) in displayedLogs" :key="idx" class="log-line mb-1">
-          <span class="text-slate-400 mr-2">[{{ log.time }}]</span>
-          <span :class="getLogLevelClass(log.level)">[{{ log.level }}]</span>
-          <span class="ml-2">{{ log.message }}</span>
+
+        <!-- 子任务过滤导航标签 -->
+        <div
+          v-if="selectedTask && selectedTask.subtasks && selectedTask.subtasks.length > 1"
+          class="px-5 py-2.5 bg-muted/40 border-b border-border/60 flex items-center gap-1.5 flex-wrap text-xs"
+        >
+          <span class="text-[11px] text-muted-foreground mr-1">过滤子账号:</span>
+          <button
+            type="button"
+            :class="[
+              'px-2 py-0.5 rounded-md text-[11px] font-medium transition',
+              !selectedSubtask
+                ? 'bg-foreground text-background'
+                : 'bg-muted hover:bg-muted/80 text-muted-foreground'
+            ]"
+            @click="selectSubtaskFilter(null)"
+          >
+            全部账号 ({{ selectedTask.subtasks.length }})
+          </button>
+          <button
+            v-for="sub in selectedTask.subtasks"
+            :key="sub.id"
+            type="button"
+            :class="[
+              'px-2 py-0.5 rounded-md text-[11px] font-medium transition flex items-center gap-1',
+              selectedSubtask?.id === sub.id
+                ? 'bg-foreground text-background'
+                : 'bg-muted hover:bg-muted/80 text-muted-foreground'
+            ]"
+            @click="selectSubtaskFilter(sub)"
+          >
+            <span>{{ sub.account_name }}</span>
+            <span class="text-[9px] opacity-70">({{ sub.platform === 'xiaohongshu' ? '红' : '抖' }})</span>
+          </button>
         </div>
-      </div>
-    </el-drawer>
+
+        <!-- 终端日志输出区域 -->
+        <div class="flex-1 bg-slate-950 text-slate-100 p-4 font-mono text-xs overflow-y-auto select-text leading-relaxed">
+          <div v-if="displayedLogs.length === 0" class="text-slate-500 py-16 text-center">
+            <Terminal class="w-8 h-8 mx-auto mb-2 opacity-40" />
+            <div>{{ loadingTaskLogs ? '正在从 SQLite 数据库提取持久化执行日志...' : '暂无符合条件的运行日志' }}</div>
+          </div>
+          <div
+            v-for="(log, idx) in displayedLogs"
+            :key="idx"
+            class="py-0.5 font-mono text-[11px] flex items-start gap-2 hover:bg-slate-900/60 px-1 rounded"
+          >
+            <span class="text-slate-500 flex-shrink-0 select-none">[{{ log.time }}]</span>
+            <span :class="['flex-shrink-0 font-bold', getLogLevelClass(log.level)]">[{{ log.level }}]</span>
+            <span class="break-all text-slate-300">{{ log.message }}</span>
+          </div>
+        </div>
+      </SheetContent>
+    </Sheet>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from "vue"
-import { ElMessage } from "element-plus"
-import { Refresh, Document, Delete } from "@element-plus/icons-vue"
-import { 
-  getTasks, getTaskDetails, retryTask, cancelTask, 
+import { ElMessage, ElMessageBox } from "element-plus"
+import {
+  ListChecks, Plus, Trash2, RefreshCw, Terminal, ChevronDown,
+  Layers, Ban, Edit, Copy
+} from "lucide-vue-next"
+
+import { Card, CardContent } from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
+import { Progress } from "@/components/ui/progress"
+import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
+import { Sheet, SheetContent } from "@/components/ui/sheet"
+
+import {
+  getTasks, getTaskDetails, retryTask, cancelTask,
   deleteTask, cancelSubtask, updateSubtask, retrySubtask,
   deleteSubtask, clearFailedTasks, getTaskLogs
 } from "../api"
@@ -338,6 +541,19 @@ const tasks = ref<any[]>([])
 const statusFilter = ref("")
 const showLogDrawer = ref(false)
 const logs = ref<any[]>([])
+
+const expandedTaskIds = ref<string[]>([])
+
+const toggleExpand = (taskId: string) => {
+  const idx = expandedTaskIds.value.indexOf(taskId)
+  if (idx > -1) {
+    expandedTaskIds.value.splice(idx, 1)
+  } else {
+    expandedTaskIds.value.push(taskId)
+  }
+}
+
+const isExpanded = (taskId: string) => expandedTaskIds.value.includes(taskId)
 
 // 独立任务日志状态
 const selectedTask = ref<any>(null)
@@ -417,6 +633,58 @@ const hasFailedTasks = computed(() => {
   return tasks.value.some(t => t.fail_count > 0 || t.status === 'failed' || t.status === 'partial_failed')
 })
 
+const calcProgress = (task: any) => {
+  if (!task.total_count) return 0
+  return Math.round(((task.success_count + task.fail_count) / task.total_count) * 100)
+}
+
+const formatTime = (timeStr?: string) => {
+  if (!timeStr) return "-"
+  return timeStr.slice(0, 19).replace("T", " ")
+}
+
+const getStatusBadgeVariant = (status: string) => {
+  switch (status) {
+    case "completed": return "success"
+    case "processing": return "info"
+    case "partial_failed": return "warning"
+    case "failed": return "destructive"
+    case "cancelled": return "secondary"
+    default: return "secondary"
+  }
+}
+
+const getStatusText = (status: string) => {
+  switch (status) {
+    case "completed": return "已完成"
+    case "processing": return "执行中"
+    case "partial_failed": return "部分失败"
+    case "failed": return "失败"
+    case "cancelled": return "已取消"
+    default: return "排队待执行"
+  }
+}
+
+const getSubtaskStatusBadgeVariant = (status: string) => {
+  switch (status) {
+    case "published": return "success"
+    case "uploading": return "info"
+    case "failed": return "destructive"
+    case "cancelled": return "secondary"
+    default: return "secondary"
+  }
+}
+
+const getSubtaskStatusText = (status: string) => {
+  switch (status) {
+    case "published": return "已发布"
+    case "uploading": return "上传中"
+    case "failed": return "失败"
+    case "cancelled": return "已取消"
+    default: return "排队中"
+  }
+}
+
 // 编辑子任务模态框状态
 const editDialogVisible = ref(false)
 const editingSubtask = ref<any>(null)
@@ -425,7 +693,7 @@ const editForm = ref({
   title: "",
   description: "",
   tags: [] as string[],
-  scheduled_at: null as string | null,
+  scheduled_at: "" as string,
   cover_path: ""
 })
 
@@ -443,7 +711,6 @@ const initWebSocket = () => {
         logs.value.unshift(msg.data)
         if (logs.value.length > 300) logs.value.pop()
 
-        // 若当前打开了专属任务日志抽屉且 ID 匹配，追加到 taskLogs
         if (selectedTask.value && msg.data.task_id === selectedTask.value.id) {
           if (!selectedSubtask.value || msg.data.subtask_id === selectedSubtask.value.id) {
             taskLogs.value.push(msg.data)
@@ -461,8 +728,7 @@ const loadTasks = async () => {
   try {
     const res: any = await getTasks({ status: statusFilter.value || undefined })
     const mainTasks = res.data || []
-    
-    // 加载每个任务的子任务详情
+
     for (const t of mainTasks) {
       try {
         const detailRes: any = await getTaskDetails(t.id)
@@ -470,6 +736,13 @@ const loadTasks = async () => {
       } catch (err) {}
     }
     tasks.value = mainTasks
+
+    // 默认展开所有有执行中的任务
+    mainTasks.forEach((t: any) => {
+      if (t.status === "processing" && !expandedTaskIds.value.includes(t.id)) {
+        expandedTaskIds.value.push(t.id)
+      }
+    })
   } catch (e: any) {
     ElMessage.error(e.message)
   } finally {
@@ -487,24 +760,32 @@ const handleRetry = async (taskId: string) => {
   }
 }
 
-const handleCancelTask = async (taskId: string) => {
-  try {
-    const res: any = await cancelTask(taskId)
-    ElMessage.success(res.message)
-    loadTasks()
-  } catch (e: any) {
-    ElMessage.error(e.message)
-  }
+const confirmCancelTask = (taskId: string) => {
+  ElMessageBox.confirm("确定要取消该任务所有未发布的子作品吗？", "提示", {
+    type: "warning"
+  }).then(async () => {
+    try {
+      const res: any = await cancelTask(taskId)
+      ElMessage.success(res.message)
+      loadTasks()
+    } catch (e: any) {
+      ElMessage.error(e.message)
+    }
+  }).catch(() => {})
 }
 
-const handleDeleteTask = async (taskId: string) => {
-  try {
-    const res: any = await deleteTask(taskId)
-    ElMessage.success(res.message)
-    loadTasks()
-  } catch (e: any) {
-    ElMessage.error(e.message)
-  }
+const confirmDeleteTask = (taskId: string) => {
+  ElMessageBox.confirm("确定要删除此任务及其所有子作品记录吗？", "提示", {
+    type: "warning"
+  }).then(async () => {
+    try {
+      const res: any = await deleteTask(taskId)
+      ElMessage.success(res.message)
+      loadTasks()
+    } catch (e: any) {
+      ElMessage.error(e.message)
+    }
+  }).catch(() => {})
 }
 
 const handleCancelSubtask = async (subtaskId: string) => {
@@ -537,14 +818,18 @@ const handleDeleteSubtask = async (subtaskId: string) => {
   }
 }
 
-const handleClearFailedTasks = async () => {
-  try {
-    const res: any = await clearFailedTasks()
-    ElMessage.success(res.message)
-    loadTasks()
-  } catch (e: any) {
-    ElMessage.error(e.message)
-  }
+const confirmClearFailedTasks = () => {
+  ElMessageBox.confirm("确定要清理所有失败的任务与失败子作品吗？", "提示", {
+    type: "warning"
+  }).then(async () => {
+    try {
+      const res: any = await clearFailedTasks()
+      ElMessage.success(res.message)
+      loadTasks()
+    } catch (e: any) {
+      ElMessage.error(e.message)
+    }
+  }).catch(() => {})
 }
 
 const openEditSubtaskDialog = (sub: any) => {
@@ -553,7 +838,7 @@ const openEditSubtaskDialog = (sub: any) => {
     title: sub.title,
     description: sub.description || "",
     tags: [...(sub.tags || [])],
-    scheduled_at: sub.scheduled_at || null,
+    scheduled_at: sub.scheduled_at ? sub.scheduled_at.slice(0, 16) : "",
     cover_path: sub.cover_path || ""
   }
   editDialogVisible.value = true
@@ -567,7 +852,13 @@ const submitEditSubtask = async () => {
   }
   savingEdit.value = true
   try {
-    await updateSubtask(editingSubtask.value.id, editForm.value)
+    await updateSubtask(editingSubtask.value.id, {
+      title: editForm.value.title,
+      description: editForm.value.description,
+      tags: editForm.value.tags,
+      scheduled_at: editForm.value.scheduled_at || null,
+      cover_path: editForm.value.cover_path || null
+    })
     ElMessage.success("子作品配置修改成功！")
     editDialogVisible.value = false
     loadTasks()
@@ -580,9 +871,9 @@ const submitEditSubtask = async () => {
 
 const getLogLevelClass = (level: string) => {
   switch (level) {
-    case "SUCCESS": return "text-emerald-400 font-bold"
-    case "ERROR": return "text-rose-400 font-bold"
-    case "WARNING": return "text-amber-400 font-bold"
+    case "SUCCESS": return "text-emerald-400"
+    case "ERROR": return "text-rose-400"
+    case "WARNING": return "text-amber-400"
     default: return "text-sky-300"
   }
 }
@@ -596,40 +887,3 @@ onUnmounted(() => {
   if (ws) ws.close()
 })
 </script>
-
-<style scoped>
-.tasklist-container { padding: 10px 0; }
-.mb-1 { margin-bottom: 4px; }
-.mb-2 { margin-bottom: 8px; }
-.mb-4 { margin-bottom: 16px; }
-.mr-1 { margin-right: 4px; }
-.mr-2 { margin-right: 8px; }
-.ml-2 { margin-left: 8px; }
-.p-4 { padding: 16px; }
-.bg-slate-50 { background-color: #f8fafc; }
-.bg-slate-900 { background-color: #0f172a; }
-.text-slate-100 { color: #f1f5f9; }
-.text-slate-400 { color: #94a3b8; }
-.text-slate-500 { color: #64748b; }
-.text-emerald-400 { color: #34d399; }
-.text-rose-400 { color: #fb7185; }
-.text-amber-400 { color: #fbbf24; }
-.text-sky-300 { color: #7dd3fc; }
-.text-green-600 { color: #16a34a; }
-.text-red-500 { color: #ef4444; }
-.text-gray-400 { color: #94a3b8; }
-.text-gray-700 { color: #334155; }
-.text-xs { font-size: 12px; }
-.text-sm { font-size: 14px; }
-.text-lg { font-size: 18px; }
-.font-bold { font-weight: 600; }
-.font-mono { font-family: monospace; }
-.flex { display: flex; }
-.justify-between { justify-content: space-between; }
-.items-center { align-items: center; }
-.gap-1 { gap: 4px; }
-.gap-2 { gap: 8px; }
-.gap-4 { gap: 16px; }
-.log-terminal { height: 80vh; }
-.log-line { line-height: 1.5; word-break: break-all; }
-</style>

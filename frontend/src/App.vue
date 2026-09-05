@@ -1,81 +1,114 @@
 <template>
-  <el-container class="app-layout">
+  <div class="flex h-screen w-screen overflow-hidden bg-slate-50 font-sans text-slate-800 antialiased">
     <!-- 侧边栏导航 -->
-    <el-aside width="240px" class="aside-menu">
-      <!-- 平台品牌区 (与右侧 Header 保持 60px 等高对齐) -->
-      <div class="brand-area">
-        <img src="./assets/logo.png" alt="MatrixHub" class="brand-logo-img" />
-        <div class="brand-info">
-          <div class="brand-title-row">
-            <span class="brand-title">MatrixHub</span>
-            <span class="brand-badge">矩阵</span>
+    <aside class="flex w-60 flex-col border-r border-slate-800 bg-[#0f172a] text-slate-300">
+      <!-- 品牌区 (严格 60px 等高对齐) -->
+      <div class="flex h-[60px] items-center gap-2.5 border-b border-slate-800 px-3.5 bg-gradient-to-r from-sky-500/10 via-transparent to-transparent">
+        <img src="./assets/logo.png" alt="MatrixHub" class="h-9 w-auto max-w-[42px] object-contain drop-shadow-[0_2px_8px_rgba(56,189,248,0.35)] transition-transform duration-200 hover:scale-105" />
+        <div class="flex min-w-0 flex-1 flex-col justify-center">
+          <div class="flex items-center gap-1.5 leading-tight">
+            <span class="text-[15px] font-bold tracking-wide text-white">MatrixHub</span>
+            <span class="inline-flex items-center rounded border border-sky-500/30 bg-sky-500/15 px-1 py-0.2 text-[10px] font-semibold text-sky-400">矩阵</span>
           </div>
-          <div class="brand-subtitle">多账号矩阵分发平台</div>
+          <span class="truncate text-[11px] text-slate-400 mt-0.5">多账号矩阵分发平台</span>
         </div>
       </div>
 
-      <el-menu
-        :default-active="$route.path"
-        router
-        class="el-menu-vertical"
-        background-color="#0f172a"
-        text-color="#94a3b8"
-        active-text-color="#38bdf8"
-      >
-        <el-menu-item index="/">
-          <el-icon><Odometer /></el-icon>
-          <span>概览仪表盘</span>
-        </el-menu-item>
-        <el-menu-item index="/accounts">
-          <el-icon><User /></el-icon>
-          <span>账号矩阵管理</span>
-        </el-menu-item>
-        <el-menu-item index="/publish">
-          <el-icon><Promotion /></el-icon>
-          <span>创建矩阵分发</span>
-        </el-menu-item>
-        <el-menu-item index="/tasks">
-          <el-icon><Tickets /></el-icon>
-          <span>任务调度看板</span>
-        </el-menu-item>
-        <el-menu-item index="/settings">
-          <el-icon><Setting /></el-icon>
-          <span>系统全局设置</span>
-        </el-menu-item>
-      </el-menu>
+      <!-- 导航项列表 -->
+      <nav class="flex-1 space-y-1.5 p-3 overflow-y-auto">
+        <router-link
+          v-for="item in navItems"
+          :key="item.path"
+          :to="item.path"
+          class="group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-150 select-none"
+          :class="[
+            $route.path === item.path
+              ? 'bg-sky-500/15 text-sky-400 shadow-sm shadow-sky-500/10 font-semibold'
+              : 'text-slate-400 hover:bg-slate-800/80 hover:text-slate-200'
+          ]"
+        >
+          <component
+            :is="item.icon"
+            class="h-4 w-4 transition-transform duration-150 group-hover:scale-110"
+            :class="[ $route.path === item.path ? 'text-sky-400' : 'text-slate-400 group-hover:text-slate-200' ]"
+          />
+          <span class="truncate">{{ item.name }}</span>
+          <span
+            v-if="item.badge"
+            class="ml-auto rounded-full bg-slate-800 px-1.5 py-0.5 text-[10px] font-semibold text-slate-400"
+          >
+            {{ item.badge }}
+          </span>
+        </router-link>
+      </nav>
 
-      <div class="system-badge">
-        <div class="flex items-center gap-2">
-          <span class="status-dot"></span>
-          <span class="text-xs text-slate-400">本地服务已就绪</span>
+      <!-- 底部系统状态徽章 -->
+      <div class="border-t border-slate-800/90 p-3.5 bg-slate-950/40">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <span class="relative flex h-2 w-2">
+              <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75"></span>
+              <span class="relative inline-flex h-2 w-2 rounded-full bg-emerald-500"></span>
+            </span>
+            <span class="text-xs text-slate-400">本地自动化引擎就绪</span>
+          </div>
+          <span class="text-[10px] font-mono text-slate-400">v0.1</span>
         </div>
       </div>
-    </el-aside>
+    </aside>
 
     <!-- 主工作区 -->
-    <el-container class="main-container">
-      <el-header class="app-header">
-        <div class="font-bold text-gray-700 text-base">
-          {{ $route.meta.title || "自媒体多账号矩阵分发平台" }}
+    <div class="flex flex-1 flex-col overflow-hidden">
+      <!-- 顶部 Header (严格 60px 等高) -->
+      <header class="flex h-[60px] items-center justify-between border-b border-slate-200 bg-white px-6 shadow-sm">
+        <div class="flex items-center gap-2.5">
+          <h1 class="text-base font-bold text-slate-800 tracking-tight">
+            {{ $route.meta.title || "控制台" }}
+          </h1>
+          <span class="text-xs text-slate-400 font-normal">/</span>
+          <span class="text-xs text-slate-500 font-normal">自媒体矩阵分发平台</span>
         </div>
-        <div class="flex items-center gap-3">
-          <el-tag size="small" type="success" effect="plain">v0.1.0 (本地私有化)</el-tag>
-        </div>
-      </el-header>
 
-      <el-main class="app-main">
+        <div class="flex items-center gap-3">
+          <router-link
+            to="/publish"
+            class="inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm shadow-blue-500/20 transition-all hover:brightness-110 active:scale-95"
+          >
+            <Send class="h-3.5 w-3.5" />
+            <span>创建分发任务</span>
+          </router-link>
+        </div>
+      </header>
+
+      <!-- 页面主要内容区 -->
+      <main class="flex-1 overflow-y-auto bg-slate-50/60 p-6">
         <router-view />
-      </el-main>
-    </el-container>
+      </main>
+    </div>
 
     <!-- 全局 Manus 风格实时受控浏览器视窗 -->
     <LiveBrowserPreview />
-  </el-container>
+  </div>
 </template>
 
 <script setup lang="ts">
-import { Odometer, User, Promotion, Tickets, Setting } from "@element-plus/icons-vue"
+import { LayoutDashboard, Users2, Send, Layers, Settings2 } from "lucide-vue-next"
 import LiveBrowserPreview from "./components/LiveBrowserPreview.vue"
+
+interface NavItem {
+  name: string
+  path: string
+  icon: any
+  badge?: string
+}
+
+const navItems: NavItem[] = [
+  { name: "概览仪表盘", path: "/", icon: LayoutDashboard },
+  { name: "账号矩阵管理", path: "/accounts", icon: Users2 },
+  { name: "创建矩阵分发", path: "/publish", icon: Send },
+  { name: "任务调度看板", path: "/tasks", icon: Layers },
+  { name: "系统全局设置", path: "/settings", icon: Settings2 },
+]
 </script>
 
 <style>
@@ -90,138 +123,4 @@ body {
 * {
   box-sizing: border-box;
 }
-</style>
-
-<style scoped>
-.app-layout {
-  height: 100vh;
-  width: 100vw;
-  overflow: hidden;
-}
-.aside-menu {
-  background-color: #0f172a;
-  display: flex;
-  flex-direction: column;
-  border-right: 1px solid #1e293b;
-}
-.brand-area {
-  height: 60px;
-  box-sizing: border-box;
-  padding: 0 14px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  border-bottom: 1px solid #1e293b;
-  background: radial-gradient(circle at left top, rgba(56, 189, 248, 0.1) 0%, transparent 80%);
-}
-.brand-logo-img {
-  height: 38px;
-  width: auto;
-  max-width: 44px;
-  object-fit: contain;
-  flex-shrink: 0;
-  filter: drop-shadow(0 2px 8px rgba(56, 189, 248, 0.3));
-  transition: transform 0.2s ease;
-  user-select: none;
-}
-.brand-logo-img:hover {
-  transform: scale(1.06);
-}
-.brand-info {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  min-width: 0;
-  flex: 1;
-  overflow: hidden;
-}
-.brand-title-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  line-height: 1.2;
-}
-.brand-title {
-  font-size: 16px;
-  font-weight: 700;
-  color: #ffffff;
-  letter-spacing: 0.5px;
-}
-.brand-badge {
-  font-size: 10px;
-  font-weight: 600;
-  color: #38bdf8;
-  background: rgba(56, 189, 248, 0.15);
-  border: 1px solid rgba(56, 189, 248, 0.3);
-  padding: 0 4px;
-  border-radius: 4px;
-  line-height: 14px;
-  height: 15px;
-  display: inline-flex;
-  align-items: center;
-}
-.brand-subtitle {
-  font-size: 11px;
-  color: #94a3b8;
-  margin-top: 2px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  letter-spacing: 0.2px;
-}
-.el-menu-vertical {
-  border-right: none;
-  flex: 1;
-}
-.el-menu-item {
-  height: 52px;
-  line-height: 52px;
-  font-size: 14px;
-}
-.el-menu-item.is-active {
-  background-color: #1e293b !important;
-  font-weight: 600;
-  border-left: 4px solid #38bdf8;
-}
-.system-badge {
-  padding: 16px 20px;
-  border-top: 1px solid #1e293b;
-}
-.status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background-color: #10b981;
-  box-shadow: 0 0 6px #10b981;
-}
-.main-container {
-  display: flex;
-  flex-direction: column;
-  height: 100vh;
-}
-.app-header {
-  height: 60px;
-  box-sizing: border-box;
-  background: #ffffff;
-  border-bottom: 1px solid #e2e8f0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 24px;
-}
-.app-main {
-  flex: 1;
-  padding: 20px 24px;
-  overflow-y: auto;
-  background-color: #f8fafc;
-}
-.flex { display: flex; }
-.items-center { align-items: center; }
-.gap-2 { gap: 8px; }
-.gap-3 { gap: 12px; }
-.text-xs { font-size: 12px; }
-.text-base { font-size: 15px; }
-.font-bold { font-weight: 600; }
-.text-gray-700 { color: #334155; }
-.text-slate-400 { color: #94a3b8; }
 </style>
