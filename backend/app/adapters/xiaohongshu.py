@@ -384,8 +384,11 @@ class XiaohongshuAdapter(BasePublisherAdapter):
                             if (btn && !btn.disabled) return true;
                         }
                     }
-                    const normalBtn = document.querySelector('button.publishBtn, button:has-text("发布"), .ce-btn.bg-red');
+                    const normalBtn = document.querySelector('button.publishBtn, .ce-btn.bg-red, .publish-page-publish-btn button');
                     if (normalBtn && !normalBtn.disabled) return true;
+                    for (const b of document.querySelectorAll('button')) {
+                        if ((b.innerText || '').trim() === '发布' && !b.disabled) return true;
+                    }
                     return false;
                 }""")
                 if is_ready:
