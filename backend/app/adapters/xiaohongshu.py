@@ -446,28 +446,42 @@ class XiaohongshuAdapter(BasePublisherAdapter):
             if not clicked:
                 raise Exception("未找到小红书【发布】提交按钮")
 
-            await asyncio.sleep(4)
-
             # 6. 验证发布结果
-            # 检测是否出现成功提示或者跳转离开编辑页面
-            for _ in range(15):
-                await asyncio.sleep(1)
-                page_text = await page.content()
-                if "发布成功" in page_text or "已发布" in page_text or "publish/success" in page.url:
-                    log("小红书视频已成功发布！", level="SUCCESS")
-                    return {
-                        "success": True,
-                        "work_id": None,
-                        "work_url": None,
-                        "error": None
-                    }
-                # 检测平台拦截提示（如未完成实名、违规敏感词等）
-                error_el = await page.query_selector(".el-message--error, .toast-error, div[class*='error']")
-                if error_el and await error_el.is_visible():
-                    err_text = await error_el.inner_text()
-                    raise Exception(f"小红书平台提示错误: {err_text}")
+            # 紧跟点击后持续监测平台 Toast 拦截报错（如未绑定手机号、违规限制）或跳转成功页面
+            for sec in range(20):
+                await asyncio.sleep(0.8)
 
-            log("发布指令已送达，已完成提交", level="SUCCESS")
+                # 优先检测平台错误拦截提示（小红书原生为 .d-new-toast / .d-toast-content / .d-toast-icon-danger）
+                toast_err = await page.evaluate("""() => {
+                    const dangerToast = document.querySelector(
+                        '.d-toast-icon-danger, .d-toast-content, .d-new-toast, .el-message--error, .toast-error'
+                    );
+                    if (dangerToast) {
+                        const parent = dangerToast.closest('.d-new-toast, .d-toast-notice, .el-message') || dangerToast;
+                        const t = (parent.innerText || '').trim();
+                        if (t) return t;
+                    }
+                    return null;
+                }""")
+                if toast_err:
+                    raise Exception(f"小红书平台拦截提示: {toast_err}")
+
+                # 检测是否跳转离开编辑页面
+                curr_url = page.url
+                if "publish/success" in curr_url or "creator/notes" in curr_url:
+                    log("小红书视频已成功发布！", level="SUCCESS")
+                    return {"success": True, "work_id": None, "work_url": None, "error": None}
+
+                page_text = await page.content()
+                if "发布成功" in page_text or "已发布" in page_text:
+                    log("小红书视频已成功发布！", level="SUCCESS")
+                    return {"success": True, "work_id": None, "work_url": None, "error": None}
+
+            # 如果 16 秒后仍在发布页面，且没有任何成功标识，说明平台未放行
+            if "publish/publish" in page.url:
+                raise Exception("小红书发布未能确认成功（仍停留在发布页面），平台可能存在未提示的资质校验或风控拦截")
+
+            log("页面已跳转，发布已完成", level="SUCCESS")
             return {"success": True, "error": None}
 
         except Exception as e:
