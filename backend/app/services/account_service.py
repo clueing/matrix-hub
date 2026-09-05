@@ -23,6 +23,24 @@ class AccountService:
     def __init__(self):
         self._active_tasks: Dict[str, asyncio.Task] = {}
 
+    @staticmethod
+    def _apply_user_info(acc: Account, user_info: Optional[Dict[str, Any]]):
+        """同步创作者基本信息、头像、UID及互动统计"""
+        if not user_info:
+            return
+        if user_info.get("name"):
+            acc.account_name = user_info["name"]
+        if user_info.get("uid"):
+            acc.uid = str(user_info["uid"])
+        if user_info.get("avatar"):
+            acc.avatar_url = user_info["avatar"]
+        if "followers_count" in user_info:
+            acc.followers_count = user_info["followers_count"] or 0
+        if "likes_count" in user_info:
+            acc.likes_count = user_info["likes_count"] or 0
+        if "following_count" in user_info:
+            acc.following_count = user_info["following_count"] or 0
+
     async def start_login_session(
         self, 
         db: AsyncSession, 
@@ -115,10 +133,7 @@ class AccountService:
                         acc.status = "active"
                         acc.last_login_at = datetime.utcnow()
                         acc.last_check_at = datetime.utcnow()
-                        if user_info and user_info.get("name"):
-                            acc.account_name = user_info["name"]
-                        if user_info and user_info.get("uid"):
-                            acc.uid = user_info["uid"]
+                        self._apply_user_info(acc, user_info)
                         await session.commit()
                         await event_bus.emit_log(f"恭喜！【{acc.account_name}】授权登录成功！", level="SUCCESS", account_id=account_id)
                         await event_bus.broadcast("account_status_changed", acc.to_dict())
@@ -167,8 +182,7 @@ class AccountService:
             account.last_check_at = datetime.utcnow()
             if is_valid:
                 account.status = "active"
-                if user_info and user_info.get("name"):
-                    account.account_name = user_info["name"]
+                self._apply_user_info(account, user_info)
             else:
                 account.status = "expired"
 
@@ -270,8 +284,7 @@ class AccountService:
                         if not page.is_closed():
                             try:
                                 info = await adapter._extract_user_info_from_page(page)
-                                if info and info.get("name"):
-                                    acc.account_name = info["name"]
+                                self._apply_user_info(acc, info)
                             except Exception:
                                 pass
                         await session.commit()

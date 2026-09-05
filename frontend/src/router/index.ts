@@ -38,4 +38,13 @@ const router = createRouter({
   routes
 })
 
+router.afterEach((to) => {
+  const pageTitle = to.meta.title as string | undefined
+  if (pageTitle) {
+    document.title = `${pageTitle} - MatrixHub 自媒体矩阵分发平台`
+  } else {
+    document.title = "MatrixHub 自媒体矩阵分发平台"
+  }
+})
+
 export default router

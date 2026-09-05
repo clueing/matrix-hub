@@ -128,13 +128,19 @@ class DouyinAdapter(BasePublisherAdapter):
         return False, None
 
     async def _extract_user_info_from_page(self, page: Page) -> Dict[str, Any]:
-        """提取抖音昵称信息"""
+        """提取抖音创作者昵称、头像、UID及统计信息"""
+        account_name = "抖音创作者"
+        uid = None
+        avatar = None
+        fans_count = 0
+        likes_count = 0
+        following_count = 0
+
         name_selectors = [
             ".semi-navigation-header-title", ".user-name", 
             "span[class*='name']", "div[class*='account-name']",
             ".header-user-info span"
         ]
-        account_name = "抖音创作者"
         for sel in name_selectors:
             try:
                 el = await page.query_selector(sel)
@@ -145,7 +151,57 @@ class DouyinAdapter(BasePublisherAdapter):
                         break
             except Exception:
                 pass
-        return {"name": account_name, "uid": None, "avatar": None}
+
+        avatar_selectors = [
+            ".semi-avatar img", ".header-user-info img", 
+            "img[class*='avatar']", ".avatar img"
+        ]
+        for sel in avatar_selectors:
+            try:
+                el = await page.query_selector(sel)
+                if el:
+                    src = await el.get_attribute("src")
+                    if src and not src.startswith("data:image/svg"):
+                        avatar = src
+                        break
+            except Exception:
+                pass
+
+        # 尝试从页面全局变量或 DOM 中提取粉丝、关注等
+        try:
+            stats = await page.evaluate(r"""() => {
+                const res = { fans: 0, likes: 0, follows: 0 };
+                const text = document.body.innerText || '';
+                const fansMatch = text.match(/粉丝[^\d]*(\d+[\.\d]*[wW万kK]?)/);
+                if (fansMatch) {
+                    let v = fansMatch[1];
+                    if (v.includes('万') || v.toLowerCase().includes('w')) res.fans = Math.round(parseFloat(v) * 10000);
+                    else if (v.toLowerCase().includes('k')) res.fans = Math.round(parseFloat(v) * 1000);
+                    else res.fans = parseInt(v) || 0;
+                }
+                const likeMatch = text.match(/(获赞|点赞)[^\d]*(\d+[\.\d]*[wW万kK]?)/);
+                if (likeMatch) {
+                    let v = likeMatch[2];
+                    if (v.includes('万') || v.toLowerCase().includes('w')) res.likes = Math.round(parseFloat(v) * 10000);
+                    else if (v.toLowerCase().includes('k')) res.likes = Math.round(parseFloat(v) * 1000);
+                    else res.likes = parseInt(v) || 0;
+                }
+                return res;
+            }""")
+            if stats:
+                fans_count = stats.get("fans", 0)
+                likes_count = stats.get("likes", 0)
+        except Exception:
+            pass
+
+        return {
+            "name": account_name,
+            "uid": uid,
+            "avatar": avatar,
+            "followers_count": fans_count,
+            "likes_count": likes_count,
+            "following_count": following_count
+        }
 
     async def publish_video(
         self, 

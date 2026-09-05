@@ -139,8 +139,52 @@ class XiaohongshuAdapter(BasePublisherAdapter):
         return False, None
 
     async def _extract_user_info_from_page(self, page: Page) -> Dict[str, Any]:
-        """从当前已登录页面中提取创作者昵称等基本信息"""
+        """从当前已登录页面或小红书官方接口提取创作者昵称、UID、头像、粉丝数、获赞数与关注数"""
         account_name = "小红书创作者"
+        uid = None
+        avatar = None
+        fans_count = 0
+        likes_count = 0
+        following_count = 0
+
+        # 1. 优先通过创作者后台官方接口直接获取高保真统计数据
+        try:
+            api_info = await page.evaluate("""async () => {
+                try {
+                    const r = await fetch('/api/galaxy/creator/home/personal_info', { credentials: 'include' });
+                    if (r.ok) {
+                        const j = await r.json();
+                        if (j && j.data) return j.data;
+                    }
+                } catch (e) {}
+                try {
+                    const r2 = await fetch('/api/galaxy/user/info', { credentials: 'include' });
+                    if (r2.ok) {
+                        const j2 = await r2.json();
+                        if (j2 && j2.data) return j2.data;
+                    }
+                } catch (e) {}
+                return null;
+            }""")
+            if api_info:
+                account_name = api_info.get("name") or api_info.get("userName") or account_name
+                uid = api_info.get("red_num") or api_info.get("redId") or api_info.get("userId")
+                avatar = api_info.get("avatar") or api_info.get("userAvatar")
+                fans_count = api_info.get("fans_count") or 0
+                likes_count = api_info.get("faved_count") or 0
+                following_count = api_info.get("follow_count") or 0
+                return {
+                    "name": account_name,
+                    "uid": str(uid) if uid else None,
+                    "avatar": avatar,
+                    "followers_count": fans_count,
+                    "likes_count": likes_count,
+                    "following_count": following_count
+                }
+        except Exception:
+            pass
+
+        # 2. 兜底 DOM 选择器解析
         name_selectors = [
             ".name-box", ".user-name", ".con-name", 
             "div[class*='userName']", "div[class*='name']",
@@ -156,7 +200,22 @@ class XiaohongshuAdapter(BasePublisherAdapter):
                         break
             except Exception:
                 pass
-        return {"name": account_name, "uid": None, "avatar": None}
+
+        avatar_el = await page.query_selector(".header-avatar img, .avatar img, img[class*='avatar']")
+        if avatar_el:
+            try:
+                avatar = await avatar_el.get_attribute("src")
+            except Exception:
+                pass
+
+        return {
+            "name": account_name,
+            "uid": str(uid) if uid else None,
+            "avatar": avatar,
+            "followers_count": fans_count,
+            "likes_count": likes_count,
+            "following_count": following_count
+        }
 
     async def _safe_input_text(
         self, 

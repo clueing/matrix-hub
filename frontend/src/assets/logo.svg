@@ -27,6 +27,7 @@
     <line x1="24" y1="24" x2="13" y2="30" />
     <line x1="24" y1="24" x2="13" y2="18" />
     
+    <!-- Outer perimeter polygon connecting matrix points -->
     <polygon points="24,11 35,18 35,30 24,37 13,30 13,18" fill="none" stroke="url(#mhGrad)" stroke-width="1" stroke-dasharray="2,2" opacity="0.6" />
   </g>
 

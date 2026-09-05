@@ -3,8 +3,8 @@
     <!-- 侧边栏导航 -->
     <el-aside width="240px" class="aside-menu">
       <div class="brand-logo">
-        <span class="logo-icon">🚀</span>
-        <span class="logo-text">matrix-hub</span>
+        <img src="./assets/logo.svg" alt="MatrixHub" class="logo-img" />
+        <span class="logo-text">MatrixHub</span>
       </div>
       <div class="brand-sub">自媒体多账号矩阵分发平台</div>
 
@@ -104,8 +104,12 @@ body {
   align-items: center;
   gap: 10px;
 }
-.logo-icon {
-  font-size: 24px;
+.logo-img {
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  box-shadow: 0 0 12px rgba(56, 189, 248, 0.3);
 }
 .logo-text {
   font-size: 20px;

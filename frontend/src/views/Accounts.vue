@@ -28,38 +28,95 @@
     <el-row :gutter="16" v-loading="loading">
       <el-col :span="8" v-for="acc in accounts" :key="acc.id" class="mb-4">
         <el-card shadow="hover" class="account-card">
+          <!-- 头部：头像、账号名、平台徽标与在线状态 -->
           <div class="flex justify-between items-start mb-3">
-            <div class="flex items-center gap-3">
-              <el-avatar :size="48" :src="acc.avatar_url">
+            <div class="flex items-center gap-3 min-w-0">
+              <el-avatar 
+                :size="52" 
+                :src="acc.avatar_url" 
+                class="account-avatar shadow-sm border border-slate-200 flex-shrink-0"
+              >
                 {{ acc.account_name ? acc.account_name.slice(0, 2) : "平台" }}
               </el-avatar>
-              <div>
-                <div class="font-bold text-base flex items-center gap-2">
-                  {{ acc.account_name }}
-                  <el-tag size="small" :type="getPlatformTagType(acc.platform)">
+              <div class="min-w-0">
+                <div class="font-bold text-base flex items-center gap-2 truncate">
+                  <span class="truncate" :title="acc.account_name">{{ acc.account_name }}</span>
+                  <el-tag size="small" :type="getPlatformTagType(acc.platform)" effect="light" class="flex-shrink-0">
                     {{ getPlatformLabel(acc.platform) }}
                   </el-tag>
                 </div>
-                <div class="text-xs text-gray-400 mt-1">分组: {{ acc.group_name }}</div>
+                <div class="text-xs text-gray-400 mt-1 flex items-center gap-2">
+                  <span class="bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded text-[11px]">
+                    {{ acc.group_name }}
+                  </span>
+                </div>
               </div>
             </div>
-            <div>
+            <div class="flex-shrink-0">
               <el-tag v-if="acc.status === 'active'" type="success" effect="dark" size="small">在线有效</el-tag>
               <el-tag v-else-if="acc.status === 'expired'" type="danger" effect="dark" size="small">登录失效</el-tag>
               <el-tag v-else type="info" size="small">未授权</el-tag>
             </div>
           </div>
 
-          <div class="account-meta text-xs text-gray-500 mb-4">
-            <div>UID: {{ acc.uid || "暂未捕获" }}</div>
-            <div>最近健康检测: {{ acc.last_check_at ? acc.last_check_at.slice(0, 19).replace('T', ' ') : "未检测" }}</div>
+          <!-- 账号 ID / UID 识别条 -->
+          <div class="uid-strip mb-3 bg-slate-50 px-2.5 py-1.5 rounded flex items-center justify-between text-xs text-slate-500 border border-slate-100">
+            <div class="flex items-center gap-1.5 truncate">
+              <span class="text-slate-400 font-mono">ID:</span>
+              <span class="font-mono font-medium text-slate-700 select-all truncate">
+                {{ acc.uid || "未获取 (点击检测同步)" }}
+              </span>
+            </div>
+            <el-button 
+              v-if="acc.uid" 
+              size="small" 
+              type="primary" 
+              link 
+              class="!p-0 text-xs flex-shrink-0"
+              @click="copyText(acc.uid)"
+            >
+              复制
+            </el-button>
+          </div>
+
+          <!-- 3列数据指标统计条 (粉丝数、点赞数、关注数) -->
+          <div class="stats-grid grid grid-cols-3 gap-2 mb-3 bg-slate-50/80 p-2.5 rounded-lg border border-slate-100 text-center">
+            <div class="stat-col">
+              <div class="stat-num text-sm font-bold text-slate-800 font-mono">
+                {{ formatCount(acc.followers_count) }}
+              </div>
+              <div class="stat-label text-[11px] text-slate-400 mt-0.5">粉丝数量</div>
+            </div>
+            <div class="stat-col border-x border-slate-200/60">
+              <div class="stat-num text-sm font-bold text-rose-600 font-mono">
+                {{ formatCount(acc.likes_count) }}
+              </div>
+              <div class="stat-label text-[11px] text-slate-400 mt-0.5">获赞与收藏</div>
+            </div>
+            <div class="stat-col">
+              <div class="stat-num text-sm font-bold text-slate-700 font-mono">
+                {{ formatCount(acc.following_count) }}
+              </div>
+              <div class="stat-label text-[11px] text-slate-400 mt-0.5">关注数量</div>
+            </div>
+          </div>
+
+          <div class="account-meta text-[11px] text-gray-400 mb-3 flex items-center justify-between">
+            <span>最近检测: {{ acc.last_check_at ? acc.last_check_at.slice(0, 16).replace('T', ' ') : "未检测" }}</span>
+            <span v-if="checkingAccountId === acc.id" class="text-blue-500 font-medium">正在同步数据...</span>
           </div>
 
           <!-- 操作按钮组 -->
           <div class="flex justify-between items-center border-t pt-3">
             <div class="flex gap-1">
-              <el-button size="small" type="primary" link @click="handleCheckHealth(acc)">
-                <el-icon><Refresh /></el-icon> 检测
+              <el-button 
+                size="small" 
+                type="primary" 
+                link 
+                :loading="checkingAccountId === acc.id" 
+                @click="handleCheckHealth(acc)"
+              >
+                <el-icon><Refresh /></el-icon> 检测更新
               </el-button>
               <el-button size="small" type="warning" link @click="handleLaunchAssist(acc)">
                 <el-icon><Monitor /></el-icon> 呼出窗口
@@ -183,6 +240,27 @@ import {
 const loading = ref(false)
 const accounts = ref<any[]>([])
 const platformFilter = ref("")
+const checkingAccountId = ref("")
+
+const formatCount = (val: number | null | undefined) => {
+  if (!val || val === 0) return "0"
+  if (val >= 10000) {
+    return (val / 10000).toFixed(1).replace(/\.0$/, "") + "w"
+  }
+  if (val >= 1000) {
+    return (val / 1000).toFixed(1).replace(/\.0$/, "") + "k"
+  }
+  return String(val)
+}
+
+const copyText = (text: string) => {
+  if (!text) return
+  navigator.clipboard.writeText(text).then(() => {
+    ElMessage.success("账号ID已成功复制到剪贴板！")
+  }).catch(() => {
+    ElMessage.warning("复制失败")
+  })
+}
 
 // 登录模态框控制
 const loginDialogVisible = ref(false)
@@ -315,12 +393,13 @@ const handleAssistFromDialog = async () => {
 }
 
 const handleCheckHealth = async (acc: any) => {
-  const loadingMsg = ElMessage.info({ message: `正在检测【${acc.account_name}】登录态...`, duration: 0 })
+  checkingAccountId.value = acc.id
+  const loadingMsg = ElMessage.info({ message: `正在检测并同步【${acc.account_name}】最新数据...`, duration: 0 })
   try {
     const res: any = await checkAccountHealth(acc.id)
     loadingMsg.close()
     if (res.data.status === "active") {
-      ElMessage.success(`【${acc.account_name}】登录态有效！`)
+      ElMessage.success(`【${acc.account_name}】登录有效，头像与互动统计数据已同步！`)
     } else {
       ElMessage.warning(`【${acc.account_name}】登录态已过期，请重新登录`)
     }
@@ -328,6 +407,8 @@ const handleCheckHealth = async (acc: any) => {
   } catch (e: any) {
     loadingMsg.close()
     ElMessage.error(e.message)
+  } finally {
+    checkingAccountId.value = ""
   }
 }
 
