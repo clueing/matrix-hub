@@ -65,13 +65,15 @@ class BasePublisherAdapter(ABC):
         self, 
         page: Page, 
         subtask_data: Dict[str, Any],
-        on_progress: Optional[Callable[[str, str], Any]] = None
+        on_progress: Optional[Callable[[str, str], Any]] = None,
+        on_verify_required: Optional[Callable[[Dict[str, Any]], Any]] = None
     ) -> Dict[str, Any]:
         """
         执行自动化发布视频核心流程
         :param page: Playwright 页面对象
         :param subtask_data: 子任务详情 (包含视频路径、标题、描述、标签、定时信息等)
         :param on_progress: 进度实时回调函数 (log_level, log_message)
+        :param on_verify_required: 二次安全验证回调函数 (接收验证信息字典，返回用户交互异步通道队列)
         :return: 执行结果字典 {'success': bool, 'work_id': ..., 'work_url': ..., 'error': ...}
         """
         pass

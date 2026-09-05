@@ -306,7 +306,8 @@ class DouyinAdapter(BasePublisherAdapter):
         self, 
         page: Page, 
         subtask_data: Dict[str, Any],
-        on_progress: Optional[Callable[[str, str], Any]] = None
+        on_progress: Optional[Callable[[str, str], Any]] = None,
+        on_verify_required: Optional[Callable[[Dict[str, Any]], Any]] = None
     ) -> Dict[str, Any]:
         """
         自动化执行抖音视频上传与发布全流程
@@ -489,20 +490,148 @@ class DouyinAdapter(BasePublisherAdapter):
                 curr_url = page.url
                 page_text = await page.evaluate("() => document.body ? document.body.innerText : ''")
 
-                # 1) 检测是否弹出短信验证码或人机验证
-                if "短信验证码" in page_text or "人机验证" in page_text or "滑动验证" in page_text:
-                    log("检测到抖音触发安全验证（短信验证码或人机滑块），请在浏览器视窗中完成验证...", level="WARNING")
-                    # 持续等待用户在视窗中完成验证
+                # 自动关闭功能引导气泡（如“视频预览功能：我知道了”）
+                know_btn = await page.query_selector("button:has-text('我知道了'), div:has-text('我知道了')")
+                if know_btn and await know_btn.is_visible():
+                    try:
+                        await know_btn.click()
+                    except Exception:
+                        pass
+
+                # 1) 检测是否弹出短信验证码弹窗
+                verify_modal = await page.query_selector("div:has-text('接收短信验证码'), div:has-text('当前手机号')")
+                if ("接收短信验证码" in page_text or "当前手机号" in page_text) and verify_modal and await verify_modal.is_visible():
+                    log("检测到抖音触发二次安全短信验证码...", level="WARNING")
+                    phone_match = re.search(r"当前手机号[：:\s]*([0-9\*]+)", page_text)
+                    phone_str = phone_match.group(1) if phone_match else ""
+
+                    # 自动触发点击【获取验证码】按钮 (若尚未在倒计时中)
+                    get_code_btn = await page.query_selector("button:has-text('获取验证码'), div:has-text('获取验证码'), span:has-text('获取验证码')")
+                    if get_code_btn and await get_code_btn.is_visible():
+                        btn_text = (await get_code_btn.inner_text()).strip()
+                        if "获取验证码" in btn_text and "重新" not in btn_text and "秒" not in btn_text and "s" not in btn_text.lower():
+                            log(f"正在自动点击【获取验证码】向手机 {phone_str} 发送短信验证码...")
+                            try:
+                                await get_code_btn.click()
+                            except Exception as click_err:
+                                log(f"点击获取验证码按钮异常: {click_err}", level="WARNING")
+                            await asyncio.sleep(0.5)
+
+                    if on_verify_required:
+                        log(f"已唤起 Web 端内二次验证通道，等待用户输入收到的短信验证码 (目标手机: {phone_str})...", level="WARNING")
+                        verify_queue: asyncio.Queue = await on_verify_required({
+                            "type": "sms",
+                            "phone": phone_str,
+                            "timeout": 120
+                        })
+
+                        # 循环等待前端网页输入验证码或重发/取消指令
+                        verify_start = asyncio.get_event_loop().time()
+                        verification_passed = False
+                        while asyncio.get_event_loop().time() - verify_start < 120:
+                            time_left = max(1.0, 120 - (asyncio.get_event_loop().time() - verify_start))
+                            try:
+                                action_data = await asyncio.wait_for(verify_queue.get(), timeout=time_left)
+                            except asyncio.TimeoutError:
+                                log("等待用户输入短信验证码超时 (120秒)，发布终止", level="ERROR")
+                                return {"success": False, "error": "短信验证码输入超时"}
+
+                            action = action_data.get("action")
+                            if action == "cancel":
+                                log("用户在网页端取消了短信验证，终止发布", level="WARNING")
+                                cancel_btn = await page.query_selector("button:has-text('取消'), div:has-text('取消')")
+                                if cancel_btn and await cancel_btn.is_visible():
+                                    try:
+                                        await cancel_btn.click()
+                                    except Exception:
+                                        pass
+                                return {"success": False, "error": "用户取消短信验证"}
+
+                            elif action == "resend":
+                                log("用户请求重新获取短信验证码，正在触发页面点击...", level="INFO")
+                                resend_btn = await page.query_selector("button:has-text('获取验证码'), div:has-text('获取验证码'), span:has-text('获取验证码'), span:has-text('重新获取')")
+                                if resend_btn and await resend_btn.is_visible():
+                                    try:
+                                        await resend_btn.click()
+                                        log("已在后台成功点击重新发送验证码", level="SUCCESS")
+                                    except Exception as e:
+                                        log(f"重新点击发送验证码失败: {e}", level="WARNING")
+                                else:
+                                    log("当前无法重新获取验证码，可能尚未到重发间隔", level="WARNING")
+
+                            elif action == "submit":
+                                code = str(action_data.get("code", "")).strip()
+                                if not code:
+                                    continue
+                                log(f"收到网页端输入的验证码 [{code}]，正在自动填入并提交校验...")
+                                code_input = await page.query_selector("input[placeholder*='验证码']")
+                                if code_input:
+                                    await code_input.click()
+                                    await code_input.fill("")
+                                    await code_input.fill(code)
+                                    await asyncio.sleep(0.3)
+                                else:
+                                    log("未在页面中找到验证码输入框", level="ERROR")
+                                    continue
+
+                                confirm_btn = await page.query_selector("button:has-text('验证'), div:has-text('验证')")
+                                if confirm_btn and await confirm_btn.is_visible():
+                                    await confirm_btn.click()
+                                    log("已点击【验证】按钮，正在校验...")
+                                    await asyncio.sleep(2)
+
+                                # 检查页面是否提示错误
+                                error_tip = await page.query_selector(".semi-toast, .semi-form-item-explain, div[class*='error'], div[class*='feedback']")
+                                err_text = ""
+                                if error_tip and await error_tip.is_visible():
+                                    err_text = (await error_tip.inner_text()).strip()
+
+                                curr_modal_text = ""
+                                modal_check = await page.query_selector("div:has-text('接收短信验证码')")
+                                if modal_check and await modal_check.is_visible():
+                                    curr_modal_text = await page.evaluate("(m) => m ? m.innerText : ''", modal_check)
+
+                                if any(w in err_text or w in curr_modal_text for w in ["错误", "失效", "不正确", "过期", "重新输入"]):
+                                    fail_reason = err_text or "验证码错误或已失效"
+                                    log(f"短信验证码校验未通过: {fail_reason}，等待重新输入...", level="ERROR")
+                                    from app.core.event_bus import event_bus
+                                    await event_bus.broadcast("verification_failed", {
+                                        "subtask_id": subtask_data.get("id"),
+                                        "error": fail_reason
+                                    })
+                                    continue
+                                else:
+                                    log("短信验证码已通过，验证弹窗已关闭！", level="SUCCESS")
+                                    from app.core.event_bus import event_bus
+                                    await event_bus.broadcast("verification_success", {
+                                        "subtask_id": subtask_data.get("id")
+                                    })
+                                    verification_passed = True
+                                    await asyncio.sleep(2)
+                                    break
+
+                        if not verification_passed:
+                            return {"success": False, "error": "短信验证码校验未通过"}
+                    else:
+                        # 未注入交互通道时的降级方案
+                        log("未提供端内验证交互通道，请在实时视窗中手动输入短信验证码...", level="WARNING")
+                        if sec > 45:
+                            return {"success": False, "error": "抖音发布触发安全短信验证码，等待超时未完成"}
+                        continue
+
+                # 2) 检测是否弹出人机验证/滑动验证
+                elif "人机验证" in page_text or "滑动验证" in page_text:
+                    log("检测到抖音触发人机滑块验证，请打开实时视窗完成滑块验证...", level="WARNING")
                     if sec > 45:
-                        return {"success": False, "error": "抖音发布触发安全短信验证码/人机验证，等待超时未完成"}
+                        return {"success": False, "error": "抖音发布触发人机滑块验证，等待超时未完成"}
                     continue
 
-                # 2) 检测是否成功跳转至内容管理列表
+                # 3) 检测是否成功跳转至内容管理列表
                 if "manage" in curr_url or "发布成功" in page_text or "已发布" in page_text or "作品已提交" in page_text:
                     log("抖音作品已成功发布！", level="SUCCESS")
                     return {"success": True, "error": None}
 
-                # 3) 检查 URL 发生跳转且脱离了上传发布编辑页
+                # 4) 检查 URL 发生跳转且脱离了上传发布编辑页
                 if "upload" not in curr_url and "post" not in curr_url and "creator-micro" in curr_url:
                     log("抖音作品已成功发布！", level="SUCCESS")
                     return {"success": True, "error": None}

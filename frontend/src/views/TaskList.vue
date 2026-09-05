@@ -270,6 +270,17 @@
                   <!-- 操作 -->
                   <TableCell class="text-center">
                     <div class="flex items-center justify-center gap-1">
+                      <!-- 等待二次验证时显示醒目的输入验证码按钮 -->
+                      <Button
+                        v-if="sub.status === 'waiting_manual'"
+                        variant="default"
+                        size="sm"
+                        class="h-6 px-2 text-[11px] bg-amber-600 hover:bg-amber-700 text-white font-medium shadow-sm"
+                        @click="openManualVerification(sub)"
+                      >
+                        <ShieldCheck class="w-3 h-3 mr-1" /> 输入验证码
+                      </Button>
+
                       <Button
                         variant="ghost"
                         size="sm"
@@ -480,7 +491,7 @@
 import { ref, computed, onMounted, onUnmounted } from "vue"
 import { ElMessage, ElMessageBox } from "element-plus"
 import {
-  ListChecks, Plus, Trash2, RefreshCw, Terminal, ChevronDown, Copy
+  ListChecks, Plus, Trash2, RefreshCw, Terminal, ChevronDown, Copy, ShieldCheck
 } from "lucide-vue-next"
 
 import { Card } from "@/components/ui/card"
@@ -632,6 +643,7 @@ const getSubtaskStatusBadgeVariant = (status: string) => {
   switch (status) {
     case "published": return "success"
     case "uploading": return "info"
+    case "waiting_manual": return "warning"
     case "failed": return "destructive"
     case "cancelled": return "secondary"
     default: return "secondary"
@@ -642,10 +654,24 @@ const getSubtaskStatusText = (status: string) => {
   switch (status) {
     case "published": return "已发布"
     case "uploading": return "上传中"
+    case "waiting_manual": return "等待验证码"
     case "failed": return "失败"
     case "cancelled": return "已取消"
     default: return "排队中"
   }
+}
+
+const openManualVerification = (sub: any) => {
+  window.dispatchEvent(new CustomEvent("open-verification-dialog", {
+    detail: {
+      subtask_id: sub.id,
+      task_id: sub.task_id,
+      account_id: sub.account_id,
+      account_name: sub.account_name,
+      platform: sub.platform,
+      title: sub.title
+    }
+  }))
 }
 
 // 编辑子任务模态框状态

@@ -23,6 +23,10 @@ class SubtaskItemRequest(BaseModel):
     tags_override: Optional[List[str]] = None
     scheduled_at_override: Optional[datetime] = None
 
+class SubtaskVerifyRequest(BaseModel):
+    code: Optional[str] = None
+    action: str = Field("submit", description="submit(提交验证码), resend(重发验证码), cancel(取消该任务验证)")
+
 class CreateTaskRequest(BaseModel):
     name: str = Field(..., description="任务名称/主题")
     task_type: str = Field("one_to_many", description="分发模式: one_to_many 或 many_to_many")
@@ -289,6 +293,10 @@ async def cancel_single_subtask(subtask_id: str, db: AsyncSession = Depends(get_
     if subtask.status == "published":
         raise HTTPException(status_code=400, detail="该作品已成功发布，无法取消")
 
+    # 若该子任务正处于等待二次验证，协同向后台交互通道下发 cancel 动作
+    if publisher_service.has_active_verification(subtask.id):
+        await publisher_service.submit_verification(subtask.id, action="cancel")
+
     scheduler_service.cancel_subtask_job(subtask.id)
     subtask.status = "cancelled"
     subtask.error_message = "用户已手动取消该子任务"
@@ -324,6 +332,33 @@ async def retry_single_subtask(subtask_id: str, db: AsyncSession = Depends(get_d
 
     await scheduler_service.schedule_single_subtask(subtask.id, schedule_mode="immediate")
     return {"code": 0, "message": "子任务已重新加入执行队列"}
+
+@router.post("/subtasks/{subtask_id}/verify", summary="提交或响应子任务的二次验证")
+async def verify_subtask_input(
+    subtask_id: str,
+    payload: SubtaskVerifyRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    接收前端网页输入的短信验证码或重发/取消指令，打通自动化后台填码闭环
+    """
+    res = await db.execute(select(PublishSubtask).where(PublishSubtask.id == subtask_id))
+    subtask = res.scalar_one_or_none()
+    if not subtask:
+        raise HTTPException(status_code=404, detail="子任务不存在")
+
+    if not publisher_service.has_active_verification(subtask_id):
+        raise HTTPException(status_code=400, detail="该子任务当前未处于等待验证状态或已超时")
+
+    success = await publisher_service.submit_verification(
+        subtask_id=subtask_id,
+        code=payload.code,
+        action=payload.action
+    )
+    if not success:
+        raise HTTPException(status_code=400, detail="验证指令下发失败")
+
+    return {"code": 0, "message": "验证指令已提交"}
 
 @router.delete("/subtasks/{subtask_id}", summary="单独删除指定的子任务")
 async def delete_single_subtask(subtask_id: str, db: AsyncSession = Depends(get_db)):

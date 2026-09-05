@@ -81,6 +81,9 @@
 
     <!-- 全局受控浏览器视窗 -->
     <LiveBrowserPreview />
+
+    <!-- 全局二次安全验证弹窗 -->
+    <VerificationDialog />
   </div>
 </template>
 
@@ -88,6 +91,7 @@
 import { LayoutDashboard, Users2, Send, Layers, Settings2 } from "lucide-vue-next"
 import { Button } from "@/components/ui/button"
 import LiveBrowserPreview from "./components/LiveBrowserPreview.vue"
+import VerificationDialog from "./components/VerificationDialog.vue"
 
 interface NavItem {
   name: string

@@ -17,6 +17,22 @@ class PublisherService:
     按队列串行/控并发调度各个账号的发布子任务，处理重试、状态流转与告警通知
     """
 
+    def __init__(self):
+        # 维护处于等待二次安全验证的子任务队列通道: subtask_id -> asyncio.Queue
+        self._verification_queues: Dict[str, asyncio.Queue] = {}
+
+    def has_active_verification(self, subtask_id: str) -> bool:
+        """检查指定子任务是否处于活跃等待验证状态"""
+        return subtask_id in self._verification_queues
+
+    async def submit_verification(self, subtask_id: str, code: Optional[str] = None, action: str = "submit") -> bool:
+        """向后台自动化适配器下发前端用户输入的验证码或操作动作"""
+        queue = self._verification_queues.get(subtask_id)
+        if not queue:
+            return False
+        await queue.put({"action": action, "code": code})
+        return True
+
     async def execute_subtask(self, subtask_id: str):
         """执行具体的单个发布子任务"""
         async with AsyncSessionLocal() as db:
@@ -43,6 +59,10 @@ class PublisherService:
                 subtask.error_message = f"不支持的平台: {subtask.platform}"
                 await db.commit()
                 return
+
+            # 初始化该子任务的异步验证通信通道
+            verify_queue = asyncio.Queue()
+            self._verification_queues[subtask.id] = verify_queue
 
             # 标记为上传执行中
             subtask.status = "uploading"
@@ -82,6 +102,8 @@ class PublisherService:
                     ))
 
                 subtask_dict = {
+                    "id": subtask.id,
+                    "task_id": subtask.task_id,
                     "video_path": subtask.video_path,
                     "cover_path": subtask.cover_path,
                     "title": subtask.title,
@@ -91,8 +113,38 @@ class PublisherService:
                     "scheduled_at": subtask.scheduled_at
                 }
 
-                # 执行平台发布逻辑
-                result = await adapter.publish_video(page, subtask_dict, on_progress=log_callback)
+                async def handle_verify_required(verify_info: dict) -> asyncio.Queue:
+                    """当底层适配器检测到需要二次验证时触发，将任务切至 waiting_manual 并广播全局通知"""
+                    subtask.status = "waiting_manual"
+                    await db.commit()
+                    await self._update_parent_task_stats(db, subtask.task_id)
+                    await event_bus.broadcast("subtask_status_changed", subtask.to_dict())
+                    await event_bus.broadcast("verification_required", {
+                        "subtask_id": subtask.id,
+                        "task_id": subtask.task_id,
+                        "account_id": account.id,
+                        "account_name": account.account_name,
+                        "platform": subtask.platform,
+                        "phone": verify_info.get("phone", ""),
+                        "title": subtask.title,
+                        "timeout": verify_info.get("timeout", 120)
+                    })
+                    await event_bus.emit_log(
+                        f"【{account.account_name}】作品《{subtask.title}》触发二次短信验证，已发送验证码至手机 {verify_info.get('phone', '')}，等待网页端输入...",
+                        level="WARNING",
+                        task_id=subtask.task_id,
+                        subtask_id=subtask.id,
+                        account_id=account.id
+                    )
+                    return verify_queue
+
+                # 执行平台发布逻辑并注入交互通道
+                result = await adapter.publish_video(
+                    page, 
+                    subtask_dict, 
+                    on_progress=log_callback,
+                    on_verify_required=handle_verify_required
+                )
 
                 if result.get("success"):
                     subtask.status = "published"
@@ -139,6 +191,7 @@ class PublisherService:
                     account_id=account.id
                 )
             finally:
+                self._verification_queues.pop(subtask_id, None)
                 if page:
                     await playwright_driver.stop_screencast(page)
                 if context:

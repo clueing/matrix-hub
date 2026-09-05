@@ -75,6 +75,9 @@ export const updateSubtask = (subtaskId: string, data: any) =>
 export const retrySubtask = (subtaskId: string) =>
   apiClient.post(`/tasks/subtasks/${subtaskId}/retry`)
 
+export const verifySubtask = (subtaskId: string, data: { code?: string; action: "submit" | "resend" | "cancel" }) =>
+  apiClient.post(`/tasks/subtasks/${subtaskId}/verify`, data)
+
 export const getTaskLogs = (taskId: string, subtaskId?: string) =>
   apiClient.get(`/tasks/${taskId}/logs`, { params: { subtask_id: subtaskId } })
 
