@@ -6,8 +6,10 @@ if sys.platform == "win32":
     try:
         sys.stdout.reconfigure(encoding="utf-8")
         sys.stderr.reconfigure(encoding="utf-8")
-        # Windows 必须设置 ProactorEventLoopPolicy 以支持 Playwright 子进程
-        asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
     except Exception:
         pass
 
