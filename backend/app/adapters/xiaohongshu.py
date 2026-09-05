@@ -158,6 +158,65 @@ class XiaohongshuAdapter(BasePublisherAdapter):
                 pass
         return {"name": account_name, "uid": None, "avatar": None}
 
+    async def _safe_input_text(
+        self, 
+        page: Page, 
+        selectors: list, 
+        text: str, 
+        log_fn: Optional[Callable] = None
+    ) -> bool:
+        """
+        智能安全输入：
+        1. 依次匹配候选选择器，自动判断是否为真实 input/textarea 或 contenteditable；
+        2. 若匹配到的是外层容器 div，自动向下钻取真正的输入控件；
+        3. 优先执行 click 聚焦，并结合 Control+A + Backspace 与 fill("") 彻底清空；
+        4. 采用 keyboard.type 模拟真实人工键入，确保触发前端数据双向绑定与字数统计响应。
+        """
+        for sel in selectors:
+            try:
+                el = await page.query_selector(sel)
+                if not el:
+                    continue
+                
+                # 检查当前节点是否可编辑
+                tag_name = await el.evaluate("el => el.tagName ? el.tagName.toLowerCase() : ''")
+                is_editable = await el.evaluate(
+                    "el => el.isContentEditable || ['input', 'textarea'].includes((el.tagName || '').toLowerCase())"
+                )
+                
+                target_el = el
+                if not is_editable:
+                    # 向下查找真实输入控件
+                    child = await el.query_selector("input, textarea, [contenteditable='true']")
+                    if child:
+                        target_el = child
+                        tag_name = await target_el.evaluate("el => el.tagName ? el.tagName.toLowerCase() : ''")
+                    else:
+                        continue
+
+                # 聚焦目标输入元素
+                await target_el.click()
+                await asyncio.sleep(0.1)
+
+                # 清空现有内容（优先 fill("")，兼容 Control+A + Backspace）
+                try:
+                    if tag_name in ['input', 'textarea']:
+                        await target_el.fill("")
+                    else:
+                        await page.keyboard.press("Control+A")
+                        await page.keyboard.press("Backspace")
+                except Exception:
+                    await page.keyboard.press("Control+A")
+                    await page.keyboard.press("Backspace")
+
+                await asyncio.sleep(0.1)
+                if text:
+                    await page.keyboard.type(text, delay=25)
+                return True
+            except Exception as ex:
+                continue
+        return False
+
     async def publish_video(
         self, 
         page: Page, 
@@ -209,9 +268,11 @@ class XiaohongshuAdapter(BasePublisherAdapter):
             log("等待视频上传与服务端转码解析...")
             for _ in range(60):  # 最多等待 120 秒
                 await asyncio.sleep(2)
-                # 检测上传成功或者标题输入框是否变为可编辑
-                title_input = await page.query_selector("input[placeholder*='标题'], .c-input_inner")
-                if title_input and await title_input.is_visible():
+                # 检测上传成功或者标题/正文输入框是否变为可用
+                ready_el = await page.query_selector(
+                    ".c-input_inner input, input[placeholder*='标题'], input[maxlength='20'], #post-textarea, .post-content"
+                )
+                if ready_el and await ready_el.is_visible():
                     break
             else:
                 log("上传等待超时，尝试继续填写元数据...", level="WARNING")
@@ -220,10 +281,22 @@ class XiaohongshuAdapter(BasePublisherAdapter):
             raw_title = subtask_data.get("title", "")
             xhs_title = raw_title[:20] if len(raw_title) > 20 else raw_title
             log(f"正在填写标题: {xhs_title}")
-            title_input = await page.query_selector("input[placeholder*='标题'], .c-input_inner")
-            if title_input:
-                await title_input.fill("")
-                await title_input.type(xhs_title, delay=30)
+            title_selectors = [
+                ".c-input_inner input",
+                "input[placeholder*='标题']",
+                "div[class*='title'] input",
+                ".title-input input",
+                ".c-input input",
+                "input.c-input_inner",
+                "input[maxlength='20']",
+                "input[placeholder*='填写标题']",
+                ".c-input_inner",
+                "div[class*='title']",
+            ]
+            title_ok = await self._safe_input_text(page, title_selectors, xhs_title, log_fn=log)
+            if not title_ok:
+                log("未通过选择器直接匹配到标题输入框，尝试向当前焦点直接键入标题...", level="WARNING")
+                await page.keyboard.type(xhs_title, delay=25)
 
             # 2. 填写正文描述与话题标签
             description = subtask_data.get("description") or ""
@@ -235,11 +308,17 @@ class XiaohongshuAdapter(BasePublisherAdapter):
                 full_desc = description
 
             log(f"正在填写正文描述及 {len(tags)} 个话题标签...")
-            desc_editor = await page.query_selector(
-                "#post-textarea, .post-content, div[contenteditable='true'], textarea[placeholder*='描述']"
-            )
-            if desc_editor:
-                await desc_editor.click()
+            desc_selectors = [
+                "#post-textarea",
+                ".post-content",
+                "div[contenteditable='true']",
+                "textarea[placeholder*='描述']",
+                ".ql-editor",
+                "div[class*='editor']",
+            ]
+            desc_ok = await self._safe_input_text(page, desc_selectors, full_desc, log_fn=log)
+            if not desc_ok:
+                log("未通过选择器直接匹配到描述区域，尝试向当前焦点直接键入描述...", level="WARNING")
                 await page.keyboard.type(full_desc, delay=20)
 
             # 3. 自定义封面图上传 (如果有)
