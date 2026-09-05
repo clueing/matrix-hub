@@ -17,8 +17,8 @@ export const buttonVariants = cva(
           "bg-secondary text-secondary-foreground shadow-sm hover:bg-secondary/80 active:scale-[0.98]",
         ghost: "hover:bg-accent hover:text-accent-foreground active:scale-[0.98]",
         link: "text-primary underline-offset-4 hover:underline",
-        glow: "bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-500/25 hover:shadow-blue-500/40 hover:brightness-110 active:scale-[0.98]",
-        success: "bg-emerald-600 text-white shadow hover:bg-emerald-700 active:scale-[0.98]",
+        glow: "bg-primary text-primary-foreground shadow hover:bg-primary/90 active:scale-[0.98]",
+        success: "bg-emerald-600 text-white shadow-sm hover:bg-emerald-700 active:scale-[0.98]",
       },
       size: {
         default: "h-9 px-4 py-2",

@@ -1,121 +1,104 @@
 <template>
-  <div class="space-y-6 max-w-5xl mx-auto pb-16">
+  <div class="space-y-6 max-w-4xl mx-auto pb-16">
     <!-- 顶栏：标题 -->
-    <Card class="border-border/60 bg-gradient-to-r from-card via-card to-primary/[0.03] shadow-sm">
-      <CardContent class="p-6">
-        <div class="flex items-center gap-3">
-          <div class="p-2.5 rounded-xl bg-primary/10 text-primary">
-            <SlidersHorizontal class="w-6 h-6" />
-          </div>
-          <div>
-            <h1 class="text-xl font-bold tracking-tight text-foreground">系统全局设置</h1>
-            <p class="text-xs text-muted-foreground">
-              配置 Playwright 自动化浏览器引擎、阶梯错峰防风控算法与企业外部协同 Webhook
-            </p>
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-
-    <div v-if="loading" class="py-20 text-center text-muted-foreground">
-      <RefreshCw class="w-8 h-8 mx-auto mb-2 animate-spin text-primary opacity-60" />
-      <p class="text-sm">正在加载系统配置参数...</p>
+    <div>
+      <h1 class="text-xl font-bold tracking-tight text-foreground">系统全局设置</h1>
+      <p class="text-xs text-muted-foreground mt-0.5">
+        配置 Playwright 自动化浏览器引擎并发、阶梯错峰防风控与外部协同 Webhook
+      </p>
     </div>
 
-    <div v-else class="space-y-6">
+    <div v-if="loading" class="py-20 text-center text-muted-foreground">
+      <RefreshCw class="w-7 h-7 mx-auto mb-2 animate-spin text-primary opacity-60" />
+      <p class="text-xs">正在加载系统配置参数...</p>
+    </div>
+
+    <div v-else class="space-y-5">
       <!-- 卡片 1：防风控与自动化调度策略 -->
-      <Card class="border-border/60 shadow-sm">
-        <CardHeader class="pb-4 border-b border-border/40">
-          <div class="flex items-center gap-2">
-            <ShieldCheck class="w-5 h-5 text-emerald-600" />
-            <div>
-              <CardTitle class="text-base font-semibold">自动化引擎与防风控策略</CardTitle>
-              <CardDescription class="text-xs">
-                精细控制浏览器多开并发与阶梯错峰排期，规避多账号同局域网关联风险
-              </CardDescription>
-            </div>
-          </div>
+      <Card>
+        <CardHeader class="pb-3 border-b border-border">
+          <CardTitle class="text-sm font-semibold">自动化引擎与防风控策略</CardTitle>
+          <CardDescription class="text-xs">
+            控制浏览器多开并发与账号阶梯错峰排期，规避多账号同局域网关联风险
+          </CardDescription>
         </CardHeader>
 
         <CardContent class="p-6 space-y-6">
           <!-- 浏览器最大并发数 -->
-          <div class="space-y-2.5">
-            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+          <div class="space-y-2">
+            <div class="flex items-center justify-between">
               <div>
-                <label class="text-sm font-semibold text-foreground">浏览器最大并发数</label>
-                <p class="text-xs text-muted-foreground">同一时刻允许启动的最大独立无痕浏览器实例数</p>
+                <label class="text-xs font-medium text-foreground">浏览器最大并发数</label>
+                <p class="text-[11px] text-muted-foreground">同一时刻允许启动的最大独立无痕浏览器实例数</p>
               </div>
-              <Badge variant="secondary" class="text-xs font-mono self-start sm:self-auto">
-                当前: {{ settings.max_concurrency }} 进程
-              </Badge>
+              <span class="text-xs font-mono text-muted-foreground">当前: {{ settings.max_concurrency }} 进程</span>
             </div>
 
-            <div class="grid grid-cols-2 sm:grid-cols-5 gap-2.5 max-w-xl">
+            <div class="grid grid-cols-2 sm:grid-cols-5 gap-2 max-w-md">
               <button
                 v-for="num in [1, 2, 3, 4, 5]"
                 :key="num"
                 type="button"
                 :class="[
-                  'p-3 rounded-xl border text-center transition-all flex flex-col items-center justify-center gap-1',
+                  'p-2.5 rounded-md border text-center transition-colors text-xs font-medium',
                   settings.max_concurrency === num
-                    ? 'border-primary bg-primary/[0.06] text-primary font-bold shadow-sm ring-1 ring-primary/40'
-                    : 'border-border/80 bg-card hover:bg-muted/40 text-foreground'
+                    ? 'border-primary bg-primary/5 text-primary'
+                    : 'border-border bg-card hover:bg-muted/40 text-foreground'
                 ]"
                 @click="settings.max_concurrency = num"
               >
-                <span class="text-base">{{ num }} 个实例</span>
-                <span v-if="num <= 2" class="text-[10px] text-emerald-600 font-medium">推荐 (安全)</span>
-                <span v-else class="text-[10px] text-amber-600 font-medium">需高配置</span>
+                <div>{{ num }} 个实例</div>
+                <div v-if="num <= 2" class="text-[10px] text-muted-foreground mt-0.5">推荐</div>
+                <div v-else class="text-[10px] text-muted-foreground mt-0.5">需高配置</div>
               </button>
             </div>
-            <p class="text-[11px] text-muted-foreground/80 max-w-2xl">
-              💡 <strong>运营建议</strong>：单机保持 1~2 个并发最佳，既能保证任务高效平稳进行，又能显著降低平台风控算法对短时间内多账号集中请求的关联感知。
+            <p class="text-[11px] text-muted-foreground">
+              建议单机保持 1~2 个并发，既能保证任务稳定，又能降低平台风控感知。
             </p>
           </div>
 
-          <div class="pt-2 border-t border-border/40"></div>
+          <div class="pt-2 border-t border-border"></div>
 
           <!-- 默认错峰基础间隔 -->
-          <div class="space-y-2.5">
-            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+          <div class="space-y-2">
+            <div class="flex items-center justify-between">
               <div>
-                <label class="text-sm font-semibold text-foreground">默认错峰基础间隔</label>
-                <p class="text-xs text-muted-foreground">多账号发布时的递增排队等待基准时间</p>
+                <label class="text-xs font-medium text-foreground">默认错峰基础间隔</label>
+                <p class="text-[11px] text-muted-foreground">多账号依次发布时的等待基准时间</p>
               </div>
-              <Badge variant="secondary" class="text-xs font-mono self-start sm:self-auto">
+              <span class="text-xs font-mono text-muted-foreground">
                 {{ settings.stagger_interval }} 秒 ({{ Math.round(settings.stagger_interval / 60) }} 分钟)
-              </Badge>
+              </span>
             </div>
 
-            <div class="flex items-center gap-3 max-w-md">
+            <div class="flex items-center gap-2 max-w-xs">
               <Input
                 type="number"
                 v-model.number="settings.stagger_interval"
                 min="30"
                 max="3600"
                 step="30"
-                class="h-9 font-mono"
+                class="h-8 text-xs font-mono"
               />
-              <span class="text-xs text-muted-foreground flex-shrink-0">秒</span>
+              <span class="text-xs text-muted-foreground">秒</span>
             </div>
 
-            <!-- 快捷预设按钮 -->
-            <div class="flex items-center gap-2 flex-wrap">
-              <span class="text-[11px] text-muted-foreground">常用预设:</span>
+            <div class="flex items-center gap-1.5 flex-wrap">
+              <span class="text-[11px] text-muted-foreground">预设:</span>
               <button
                 v-for="preset in [
-                  { label: '1分钟 (测试)', sec: 60 },
-                  { label: '3分钟 (轻量)', sec: 180 },
+                  { label: '1分钟', sec: 60 },
+                  { label: '3分钟', sec: 180 },
                   { label: '5分钟 (标准)', sec: 300 },
-                  { label: '10分钟 (高防护)', sec: 600 }
+                  { label: '10分钟', sec: 600 }
                 ]"
                 :key="preset.sec"
                 type="button"
                 :class="[
-                  'text-xs px-2.5 py-1 rounded-md border transition',
+                  'text-[11px] px-2 py-0.5 rounded border transition-colors',
                   settings.stagger_interval === preset.sec
-                    ? 'bg-primary/10 border-primary/40 text-primary font-medium'
-                    : 'bg-muted/40 hover:bg-muted border-border/60 text-muted-foreground'
+                    ? 'border-primary bg-primary/5 text-primary'
+                    : 'border-border bg-muted/30 text-muted-foreground hover:text-foreground'
                 ]"
                 @click="settings.stagger_interval = preset.sec"
               >
@@ -124,44 +107,41 @@
             </div>
           </div>
 
-          <div class="pt-2 border-t border-border/40"></div>
+          <div class="pt-2 border-t border-border"></div>
 
           <!-- 错峰随机扰动时间 -->
-          <div class="space-y-2.5">
-            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+          <div class="space-y-2">
+            <div class="flex items-center justify-between">
               <div>
-                <label class="text-sm font-semibold text-foreground">错峰随机扰动浮动时间</label>
-                <p class="text-xs text-muted-foreground">在基础间隔上增加 ±N 秒的随机波动，模拟自然人类不规律行为</p>
+                <label class="text-xs font-medium text-foreground">错峰随机扰动浮动时间</label>
+                <p class="text-[11px] text-muted-foreground">在基础间隔上增加 ±N 秒的随机波动，模拟人工行为</p>
               </div>
-              <Badge variant="secondary" class="text-xs font-mono self-start sm:self-auto">
-                ±{{ settings.stagger_jitter }} 秒
-              </Badge>
+              <span class="text-xs font-mono text-muted-foreground">±{{ settings.stagger_jitter }} 秒</span>
             </div>
 
-            <div class="flex items-center gap-3 max-w-md">
+            <div class="flex items-center gap-2 max-w-xs">
               <Input
                 type="number"
                 v-model.number="settings.stagger_jitter"
                 min="0"
                 max="300"
                 step="10"
-                class="h-9 font-mono"
+                class="h-8 text-xs font-mono"
               />
-              <span class="text-xs text-muted-foreground flex-shrink-0">秒</span>
+              <span class="text-xs text-muted-foreground">秒</span>
             </div>
 
-            <!-- 快捷预设按钮 -->
-            <div class="flex items-center gap-2 flex-wrap">
-              <span class="text-[11px] text-muted-foreground">常用扰动:</span>
+            <div class="flex items-center gap-1.5 flex-wrap">
+              <span class="text-[11px] text-muted-foreground">扰动:</span>
               <button
                 v-for="sec in [0, 30, 60, 120]"
                 :key="sec"
                 type="button"
                 :class="[
-                  'text-xs px-2.5 py-1 rounded-md border transition',
+                  'text-[11px] px-2 py-0.5 rounded border transition-colors',
                   settings.stagger_jitter === sec
-                    ? 'bg-primary/10 border-primary/40 text-primary font-medium'
-                    : 'bg-muted/40 hover:bg-muted border-border/60 text-muted-foreground'
+                    ? 'border-primary bg-primary/5 text-primary'
+                    : 'border-border bg-muted/30 text-muted-foreground hover:text-foreground'
                 ]"
                 @click="settings.stagger_jitter = sec"
               >
@@ -172,104 +152,64 @@
         </CardContent>
       </Card>
 
-      <!-- 卡片 2：Webhook 外部协作与报警机器人 -->
-      <Card class="border-border/60 shadow-sm">
-        <CardHeader class="pb-4 border-b border-border/40">
-          <div class="flex items-center gap-2">
-            <BellRing class="w-5 h-5 text-indigo-500" />
-            <div>
-              <CardTitle class="text-base font-semibold">Webhook 协同通知机器人</CardTitle>
-              <CardDescription class="text-xs">
-                任务全部发布完成、遇到严重异常或登录凭证过期时，自动向工作群推送卡片通知
-              </CardDescription>
-            </div>
-          </div>
+      <!-- 卡片 2：Webhook 通知机器人 -->
+      <Card>
+        <CardHeader class="pb-3 border-b border-border">
+          <CardTitle class="text-sm font-semibold">Webhook 通知机器人</CardTitle>
+          <CardDescription class="text-xs">
+            任务完成、异常或登录态过期时，自动向群聊推送通知
+          </CardDescription>
         </CardHeader>
 
-        <CardContent class="p-6 space-y-6">
-          <!-- 通知机器人平台 -->
-          <div class="space-y-2">
-            <label class="text-sm font-semibold text-foreground">通知机器人通道</label>
-            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 max-w-xl">
-              <div
-                :class="[
-                  'p-3.5 rounded-xl border transition-all cursor-pointer select-none flex items-center gap-3',
-                  settings.webhook_channel === 'feishu'
-                    ? 'border-primary bg-primary/[0.06] text-primary ring-1 ring-primary/30'
-                    : 'border-border/80 bg-card hover:bg-muted/30 text-foreground'
+        <CardContent class="p-6 space-y-4">
+          <!-- 平台选择 -->
+          <div class="space-y-1.5">
+            <label class="text-xs font-medium text-foreground">机器人平台</label>
+            <div class="flex gap-2.5 max-w-md">
+              <button
+                v-for="ch in [
+                  { label: '飞书群机器人', value: 'feishu' },
+                  { label: '钉钉群机器人', value: 'dingtalk' },
+                  { label: '企业微信', value: 'wecom' }
                 ]"
-                @click="settings.webhook_channel = 'feishu'"
-              >
-                <div class="w-8 h-8 rounded-lg bg-sky-500/10 text-sky-600 flex items-center justify-center font-bold text-xs">
-                  飞
-                </div>
-                <div>
-                  <div class="text-xs font-bold">飞书群机器人</div>
-                  <div class="text-[10px] text-muted-foreground">Lark / Feishu Bot</div>
-                </div>
-              </div>
-
-              <div
+                :key="ch.value"
+                type="button"
                 :class="[
-                  'p-3.5 rounded-xl border transition-all cursor-pointer select-none flex items-center gap-3',
-                  settings.webhook_channel === 'dingtalk'
-                    ? 'border-primary bg-primary/[0.06] text-primary ring-1 ring-primary/30'
-                    : 'border-border/80 bg-card hover:bg-muted/30 text-foreground'
+                  'flex-1 p-2.5 rounded-md border text-center transition-colors text-xs font-medium',
+                  settings.webhook_channel === ch.value
+                    ? 'border-primary bg-primary/5 text-primary'
+                    : 'border-border bg-card hover:bg-muted/30 text-foreground'
                 ]"
-                @click="settings.webhook_channel = 'dingtalk'"
+                @click="settings.webhook_channel = ch.value"
               >
-                <div class="w-8 h-8 rounded-lg bg-blue-500/10 text-blue-600 flex items-center justify-center font-bold text-xs">
-                  钉
-                </div>
-                <div>
-                  <div class="text-xs font-bold">钉钉群机器人</div>
-                  <div class="text-[10px] text-muted-foreground">DingTalk Bot</div>
-                </div>
-              </div>
-
-              <div
-                :class="[
-                  'p-3.5 rounded-xl border transition-all cursor-pointer select-none flex items-center gap-3',
-                  settings.webhook_channel === 'wecom'
-                    ? 'border-primary bg-primary/[0.06] text-primary ring-1 ring-primary/30'
-                    : 'border-border/80 bg-card hover:bg-muted/30 text-foreground'
-                ]"
-                @click="settings.webhook_channel = 'wecom'"
-              >
-                <div class="w-8 h-8 rounded-lg bg-emerald-500/10 text-emerald-600 flex items-center justify-center font-bold text-xs">
-                  企
-                </div>
-                <div>
-                  <div class="text-xs font-bold">企业微信群机器人</div>
-                  <div class="text-[10px] text-muted-foreground">WeCom Bot</div>
-                </div>
-              </div>
+                {{ ch.label }}
+              </button>
             </div>
           </div>
 
           <!-- Webhook URL -->
-          <div class="space-y-2">
-            <label class="text-sm font-semibold text-foreground">Webhook 完整请求 URL</label>
-            <div class="flex flex-col sm:flex-row gap-2 max-w-2xl">
+          <div class="space-y-1.5 max-w-xl">
+            <label class="text-xs font-medium text-foreground">Webhook 完整 URL</label>
+            <div class="flex gap-2">
               <Input
                 v-model="settings.webhook_url"
                 :placeholder="getPlaceholder(settings.webhook_channel)"
-                class="font-mono text-xs"
+                class="font-mono text-xs h-9"
               />
               <Button
                 type="button"
                 variant="outline"
-                size="default"
+                size="sm"
                 :disabled="testing || !settings.webhook_url"
-                class="flex-shrink-0"
+                class="h-9 flex-shrink-0"
                 @click="handleTestWebhook"
               >
-                <Send :class="['w-3.5 h-3.5 mr-1.5', testing ? 'animate-pulse' : '']" />
-                <span>{{ testing ? "测试连通中..." : "测试连通性" }}</span>
+                <Send :class="['w-3.5 h-3.5 mr-1', testing ? 'animate-pulse' : '']" />
+                <span>{{ testing ? "测试中" : "测试连通性" }}</span>
               </Button>
             </div>
             <p class="text-[11px] text-muted-foreground">
-              在群聊中添加自定义机器人后，将生成的 Webhook 完整地址粘贴至此处。
+              在群聊中添加自定义机器人后，将 Webhook 完整地址粘贴至此处。
             </p>
           </div>
         </CardContent>
@@ -280,13 +220,12 @@
         <Button
           type="button"
           variant="default"
-          size="lg"
+          size="default"
           :disabled="saving"
-          class="shadow-md"
           @click="handleSave"
         >
-          <Save class="w-4 h-4 mr-2" />
-          <span>{{ saving ? "正在保存配置..." : "保存全部系统配置" }}</span>
+          <Save class="w-4 h-4 mr-1.5" />
+          <span>{{ saving ? "正在保存..." : "保存配置" }}</span>
         </Button>
       </div>
     </div>
@@ -297,12 +236,11 @@
 import { ref, onMounted } from "vue"
 import { ElMessage } from "element-plus"
 import {
-  SlidersHorizontal, ShieldCheck, BellRing, RefreshCw, Send, Save
+  RefreshCw, Send, Save
 } from "lucide-vue-next"
 
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 
 import { getSettings, updateSettings, testWebhook } from "../api"
@@ -321,9 +259,9 @@ const settings = ref({
 
 const getPlaceholder = (channel: string) => {
   switch (channel) {
-    case "feishu": return "https://open.feishu.cn/open-apis/bot/v2/hook/xxxxxxxx-xxxx-xxxx-xxxx"
-    case "dingtalk": return "https://oapi.dingtalk.com/robot/send?access_token=xxxxxx"
-    case "wecom": return "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxxxxx"
+    case "feishu": return "https://open.feishu.cn/open-apis/bot/v2/hook/xxx"
+    case "dingtalk": return "https://oapi.dingtalk.com/robot/send?access_token=xxx"
+    case "wecom": return "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx"
     default: return "输入 Webhook URL"
   }
 }
